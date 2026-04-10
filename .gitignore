@@ -1,0 +1,12 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+
+web/node_modules/
+web/.next/
+
+dist/
+data/runtime/
+data/incoming/

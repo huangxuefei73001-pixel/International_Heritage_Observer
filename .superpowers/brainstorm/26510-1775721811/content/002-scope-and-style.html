@@ -1,0 +1,235 @@
+<style>
+  :root {
+    --ridge-1: #07111f;
+    --ridge-2: #0c1d34;
+    --ridge-3: #16345a;
+    --ridge-4: #2b5a84;
+    --mist: rgba(219, 233, 246, 0.72);
+    --trail: #d5b36d;
+    --grass: #73946f;
+    --panel: rgba(8, 18, 31, 0.62);
+    --line: rgba(213, 232, 255, 0.14);
+  }
+
+  .hero {
+    position: relative;
+    overflow: hidden;
+    border-radius: 28px;
+    padding: 36px;
+    background:
+      radial-gradient(circle at 20% 18%, rgba(123, 166, 208, 0.22), transparent 34%),
+      radial-gradient(circle at 78% 26%, rgba(89, 122, 168, 0.3), transparent 30%),
+      linear-gradient(180deg, #0d1a2c 0%, #10233b 40%, #08131f 100%);
+    border: 1px solid var(--line);
+    min-height: 360px;
+    box-shadow: 0 24px 80px rgba(2, 8, 15, 0.38);
+  }
+
+  .hero::before,
+  .hero::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 58%;
+    background-repeat: no-repeat;
+    background-size: cover;
+    pointer-events: none;
+  }
+
+  .hero::before {
+    background:
+      linear-gradient(180deg, transparent, rgba(7, 15, 28, 0.1)),
+      polygon(0 74%, 10% 68%, 20% 72%, 29% 59%, 39% 63%, 52% 44%, 64% 56%, 74% 47%, 84% 55%, 100% 39%, 100% 100%, 0 100%);
+    clip-path: polygon(0 73%, 11% 68%, 22% 74%, 34% 57%, 47% 63%, 58% 45%, 69% 54%, 81% 49%, 92% 55%, 100% 46%, 100% 100%, 0 100%);
+    background-color: rgba(26, 54, 91, 0.95);
+  }
+
+  .hero::after {
+    height: 42%;
+    clip-path: polygon(0 78%, 16% 71%, 31% 79%, 48% 61%, 60% 70%, 72% 63%, 83% 74%, 100% 58%, 100% 100%, 0 100%);
+    background: linear-gradient(180deg, rgba(65, 105, 148, 0.12), rgba(16, 36, 57, 0.94));
+  }
+
+  .trail-line {
+    position: absolute;
+    right: 8%;
+    bottom: 17%;
+    width: 32%;
+    height: 4px;
+    background: linear-gradient(90deg, rgba(213,179,109,0), rgba(213,179,109,0.7), rgba(247, 214, 153, 1));
+    transform: rotate(-13deg);
+    border-radius: 999px;
+    box-shadow: 0 0 18px rgba(230, 192, 122, 0.42);
+  }
+
+  .hero-copy {
+    position: relative;
+    max-width: 620px;
+    z-index: 2;
+  }
+
+  .eyebrow {
+    display: inline-block;
+    padding: 8px 12px;
+    border: 1px solid rgba(213, 232, 255, 0.18);
+    border-radius: 999px;
+    color: #e9f3ff;
+    letter-spacing: 0.16em;
+    font-size: 12px;
+    text-transform: uppercase;
+    background: rgba(255,255,255,0.05);
+    backdrop-filter: blur(10px);
+  }
+
+  .hero h1 {
+    margin: 18px 0 12px;
+    font-size: clamp(42px, 6vw, 78px);
+    line-height: 0.94;
+    color: #f3f7fb;
+    letter-spacing: -0.05em;
+  }
+
+  .hero p {
+    max-width: 560px;
+    color: var(--mist);
+    font-size: 18px;
+    line-height: 1.7;
+  }
+
+  .scope-grid {
+    display: grid;
+    grid-template-columns: 1.25fr 1fr;
+    gap: 18px;
+    margin-top: 22px;
+  }
+
+  .scope-panel {
+    border-radius: 24px;
+    padding: 22px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    backdrop-filter: blur(14px);
+  }
+
+  .scope-panel h3 {
+    margin: 0 0 12px;
+    color: #f4f8fd;
+  }
+
+  .scope-panel ul {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--mist);
+    line-height: 1.85;
+  }
+
+  .flow-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 22px;
+  }
+
+  .flow-step {
+    border-radius: 18px;
+    padding: 16px;
+    background: rgba(5, 14, 24, 0.56);
+    border: 1px solid rgba(213, 232, 255, 0.1);
+    min-height: 108px;
+  }
+
+  .flow-step strong {
+    display: block;
+    margin-bottom: 8px;
+    color: #eff6ff;
+  }
+
+  .flow-step span {
+    color: #adc3db;
+    line-height: 1.6;
+  }
+</style>
+
+<div class="hero">
+  <div class="trail-line"></div>
+  <div class="hero-copy">
+    <div class="eyebrow">MacLehose Trail / Deep Blue Wilderness</div>
+    <h1>先做一个能走通的山径入口</h1>
+    <p>
+      第一版不做邀请码，不做复杂权限，不做平台化扩展。先把“国际遗产观察”做成一个安静、可靠、可给少量用户直接使用的网页研究助手。
+    </p>
+  </div>
+
+  <div class="scope-grid">
+    <div class="scope-panel">
+      <h3>第一版只保留</h3>
+      <ul>
+        <li>邮箱验证码登录</li>
+        <li>聊天页</li>
+        <li>我的会话</li>
+        <li>管理员后台：查看全部对话</li>
+        <li>管理员后台：手动更新知识库</li>
+        <li>管理员后台：后续再补邀请制，不作为第一版门槛</li>
+      </ul>
+    </div>
+
+    <div class="scope-panel">
+      <h3>网页气质</h3>
+      <ul>
+        <li>深蓝夜色为主，不做科技感霓虹</li>
+        <li>山脊、雾气、路径线、地形感做氛围</li>
+        <li>像麦理浩径夜行笔记，而不是 AI 聊天模板</li>
+        <li>安静、专业、耐看，适合长期研究使用</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>收缩后的产品流</h3>
+  <div class="flow-strip">
+    <div class="flow-step">
+      <strong>登录</strong>
+      <span>邮箱验证码进入，不引入邀请码门槛。</span>
+    </div>
+    <div class="flow-step">
+      <strong>提问</strong>
+      <span>普通用户进入聊天页，直接和知识库对话。</span>
+    </div>
+    <div class="flow-step">
+      <strong>存档</strong>
+      <span>系统保存每位用户自己的历史会话与上下文。</span>
+    </div>
+    <div class="flow-step">
+      <strong>更新</strong>
+      <span>管理员在后台手动触发文章分类与更新入库。</span>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>现在请确认</h3>
+  <div class="options">
+    <div class="option" data-choice="a" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>这个收缩版对</h3>
+        <p>继续往极简数据结构和部署方案推进</p>
+      </div>
+    </div>
+    <div class="option" data-choice="b" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>风格对，但结构还要改</h3>
+        <p>继续调整页面与功能边界</p>
+      </div>
+    </div>
+    <div class="option" data-choice="c" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>风格还不够像麦理浩径</h3>
+        <p>继续把视觉语言收得更野、更山路感</p>
+      </div>
+    </div>
+  </div>
+</div>

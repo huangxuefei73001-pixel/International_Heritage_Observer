@@ -1,0 +1,18 @@
+[Unit]
+Description=International Heritage Watch Frontend
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/srv/guoji-yichan-guancha/web
+Environment=NODE_ENV=production
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3000
+Environment=NEXT_PUBLIC_API_BASE_URL=/api
+ExecStart=/usr/bin/env node /srv/guoji-yichan-guancha/web/.next/standalone/web/server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

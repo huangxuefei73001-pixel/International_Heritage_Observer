@@ -1,0 +1,96 @@
+<h2>国际遗产观察 Web 第一版</h2>
+<p class="subtitle">邀请制登录、私有会话、管理员可见全部、库更新后网页自动读最新内容</p>
+
+<div class="section">
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">用户侧</div>
+      <div class="mockup-body">
+        <div class="mock-nav">登录页 -> 会话列表 -> 聊天页</div>
+        <div style="display:grid;gap:12px;margin-top:16px;">
+          <div class="placeholder">邮箱验证码登录</div>
+          <div class="placeholder">我的历史会话</div>
+          <div class="placeholder">问答界面：问题 / 回答 / 证据文章 / 可点击原文链接</div>
+          <div class="placeholder">继续追问当前会话</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mockup">
+      <div class="mockup-header">管理员侧</div>
+      <div class="mockup-body">
+        <div class="mock-nav">后台首页 -> 用户 -> 会话 -> 邀请 -> 知识库更新</div>
+        <div style="display:grid;gap:12px;margin-top:16px;">
+          <div class="placeholder">查看全部用户</div>
+          <div class="placeholder">查看全部对话与消息</div>
+          <div class="placeholder">发放邀请链接 / 邀请邮箱</div>
+          <div class="placeholder">一键：分类并更新入库</div>
+          <div class="placeholder">查看同步日志</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>部署结构</h3>
+  <div class="mockup">
+    <div class="mockup-header">腾讯云轻量服务器</div>
+    <div class="mockup-body">
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;">
+        <div class="placeholder">Nginx</div>
+        <div class="placeholder">Next.js 网页</div>
+        <div class="placeholder">FastAPI 服务</div>
+        <div class="placeholder">Postgres</div>
+        <div class="placeholder">文章库 / 同步脚本</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:16px;">
+        <div class="placeholder">OpenRouter</div>
+        <div class="placeholder">邮箱验证码 SMTP / SES</div>
+        <div class="placeholder">本地知识库 articles.jsonl</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>回答链路</h3>
+  <div class="mockup">
+    <div class="mockup-body">
+      <div class="mock-nav">用户提问 -> FastAPI -> 读取知识库 -> 生成证据式回答 -> 存入会话 -> 返回网页</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px;">
+        <div class="placeholder">识别问题类型</div>
+        <div class="placeholder">检索相关文章</div>
+        <div class="placeholder">组织结论与证据</div>
+        <div class="placeholder">保存上下文</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>请你确认</h3>
+  <div class="options">
+    <div class="option" data-choice="a" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>这个方向对</h3>
+        <p>继续往数据表、权限和上下文设计推进</p>
+      </div>
+    </div>
+    <div class="option" data-choice="b" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>要收缩</h3>
+        <p>先减少后台或管理功能，进一步做轻</p>
+      </div>
+    </div>
+    <div class="option" data-choice="c" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>要增强</h3>
+        <p>现在就把更多自动化或团队功能放进第一版</p>
+      </div>
+    </div>
+  </div>
+</div>

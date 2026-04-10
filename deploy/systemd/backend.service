@@ -1,0 +1,16 @@
+[Unit]
+Description=International Heritage Watch Backend
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/srv/guoji-yichan-guancha
+Environment=PYTHONPATH=/srv/guoji-yichan-guancha/backend:/srv/guoji-yichan-guancha/src
+EnvironmentFile=/srv/guoji-yichan-guancha/.env
+ExecStart=/srv/guoji-yichan-guancha/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

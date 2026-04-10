@@ -1,0 +1,112 @@
+import unittest
+from datetime import datetime
+import importlib.util
+from pathlib import Path
+
+from guoji_yichan_guancha.models import ArticleRecord
+from guoji_yichan_guancha.library import build_library
+from guoji_yichan_guancha.sync import sync_incremental
+
+
+class ArticleRecordTest(unittest.TestCase):
+    def test_article_record_to_document_uses_required_fields(self) -> None:
+        record = ArticleRecord(
+            article_id="abc123",
+            title="韩国召开第48届世界遗产大会联席工作会",
+            published_at="2026-03-20 11:25",
+            channel="国际遗产观察",
+            category="韩国",
+            source_url="https://mp.weixin.qq.com/s/abamHniN0MaGiOCA54LIOQ",
+            local_source_path="/tmp/sample.docx",
+            content_text="韩国日前召开第48届世界遗产大会跨部门工作会。",
+            content_html_excerpt="<p>韩国日前召开第48届世界遗产大会跨部门工作会。</p>",
+            parse_status="ok",
+            tags_auto=["韩国", "世界遗产大会"],
+        )
+
+        document = record.to_document()
+
+        self.assertEqual(document["article_id"], "abc123")
+        self.assertTrue(document["title"].startswith("韩国召开"))
+        self.assertEqual(document["category"], "韩国")
+        self.assertEqual(document["tags_auto"], ["韩国", "世界遗产大会"])
+
+
+class BuildLibraryTest(unittest.TestCase):
+    def test_build_library_writes_jsonl_and_summary(self) -> None:
+        source_dir = Path("tests/fixtures")
+        output_dir = Path("tests/tmp/library")
+
+        if output_dir.exists():
+            for path in sorted(output_dir.rglob("*"), reverse=True):
+                if path.is_file():
+                    path.unlink()
+                elif path.is_dir():
+                    path.rmdir()
+
+        result = build_library(source_dir, output_dir)
+
+        self.assertEqual(result["article_count"], 1)
+        self.assertTrue((output_dir / "articles.jsonl").exists())
+        self.assertTrue((output_dir / "summary.json").exists())
+
+    def test_build_library_skips_existing_source_urls(self) -> None:
+        source_dir = Path("tests/fixtures")
+        output_dir = Path("tests/tmp/library-duplicates")
+
+        if output_dir.exists():
+            for path in sorted(output_dir.rglob("*"), reverse=True):
+                if path.is_file():
+                    path.unlink()
+                elif path.is_dir():
+                    path.rmdir()
+
+        first = build_library(source_dir, output_dir)
+        second = build_library(source_dir, output_dir)
+
+        self.assertEqual(first["article_count"], 1)
+        self.assertEqual(second["article_count"], 0)
+        self.assertEqual(second["skipped_duplicates"], 1)
+        self.assertEqual(second["total_article_count"], 1)
+
+    def test_sync_incremental_writes_run_log(self) -> None:
+        source_dir = Path("tests/fixtures")
+        output_dir = Path("tests/tmp/library-sync")
+        log_dir = Path("tests/tmp/sync-logs")
+
+        for target in (output_dir, log_dir):
+            if target.exists():
+                for path in sorted(target.rglob("*"), reverse=True):
+                    if path.is_file():
+                        path.unlink()
+                    elif path.is_dir():
+                        path.rmdir()
+
+        result = sync_incremental(
+            source_dir,
+            output_dir,
+            log_dir,
+            run_at=datetime(2026, 4, 9, 15, 30, 0),
+        )
+
+        self.assertEqual(result["article_count"], 1)
+        self.assertTrue((output_dir / "articles.jsonl").exists())
+        self.assertTrue((log_dir / "20260409-153000.json").exists())
+        self.assertEqual(result["log_path"], str(log_dir / "20260409-153000.json"))
+
+    def test_sync_script_defaults_to_benci_xinzeng_directory(self) -> None:
+        script_path = Path("scripts/sync_incremental.py")
+        spec = importlib.util.spec_from_file_location("sync_incremental_script", script_path)
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        self.assertEqual(
+            module.DEFAULT_SOURCE_DIR,
+            Path("/Users/pauline/Desktop/国际遗产观察/3.26-国际观察mptext抓取/本次新增"),
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
