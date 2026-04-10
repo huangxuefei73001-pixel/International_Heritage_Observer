@@ -9,14 +9,6 @@ description: Use when answering work or research questions about heritage protec
 
 Use this skill when the answer should come from the local `国际遗产观察` article archive rather than open-ended model knowledge.
 
-If this repository was cloned from GitHub onto a new machine, run:
-
-```bash
-python3 scripts/install_codex_skill.py
-```
-
-This writes a machine-local Codex skill file with the correct absolute repository paths.
-
 The workflow is evidence-first:
 
 - interpret the natural-language question
@@ -38,7 +30,7 @@ The workflow is evidence-first:
 2. Run:
 
 ```bash
-PYTHONPATH=src python3 scripts/query_library.py "<user question>" --library data/library/articles.jsonl --limit 5
+PYTHONPATH=__REPO_ROOT__/src python3 __REPO_ROOT__/scripts/query_library.py "<user question>" --library __REPO_ROOT__/data/library/articles.jsonl --limit 5
 ```
 
 3. Use the command output as the answer base.
@@ -51,21 +43,17 @@ PYTHONPATH=src python3 scripts/query_library.py "<user question>" --library data
 
 ## Refreshing The Library
 
-When new `.docx` article archives are added locally, rebuild the library with:
+### Full rebuild
 
 ```bash
-PYTHONPATH=src python3 scripts/build_library.py --source-dir "<你的文章总目录>" --output-dir data/library
+PYTHONPATH=__REPO_ROOT__/src python3 __REPO_ROOT__/scripts/build_library.py --source-dir "<你的文章总目录>" --output-dir __REPO_ROOT__/data/library
 ```
 
-This rebuilds the structured local library from the source archive directory.
-If the library already exists, the rebuild skips articles whose `source_url` is already present.
-
-For phase-2 manual incremental sync with a run log, use:
+### Incremental sync
 
 ```bash
-PYTHONPATH=src python3 scripts/sync_incremental.py --source-dir "<你的新增文章目录>" --output-dir data/library --log-dir data/sync_logs
+PYTHONPATH=__REPO_ROOT__/src python3 __REPO_ROOT__/scripts/sync_incremental.py --source-dir "<你的新增文章目录>" --output-dir __REPO_ROOT__/data/library --log-dir __REPO_ROOT__/data/sync_logs
 ```
-This appends only new articles into the existing library and writes a timestamped sync log under `data/sync_logs/`.
 
 ## Answer Style
 

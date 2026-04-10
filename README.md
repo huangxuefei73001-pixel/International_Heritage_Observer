@@ -24,7 +24,25 @@
 
 ## 给 Codex 用户使用
 
-### 1. 拷贝整个项目目录
+### 最省事的方式：clone 后一键安装
+
+1. clone 整个仓库
+2. 进入项目根目录
+3. 运行：
+
+```bash
+python3 scripts/install_codex_skill.py
+```
+
+这条命令会自动把 skill 安装到：
+
+`~/.codex/skills/guoji-yichan-guancha/SKILL.md`
+
+而且会把当前电脑上的项目绝对路径自动写进去，所以不用再手改路径。
+
+### 手动方式：拷贝整个项目目录
+
+如果你不想跑安装脚本，也可以手动安装。
 
 把整个项目目录复制给对方：
 
@@ -85,14 +103,14 @@ PYTHONPATH=src python3 scripts/sync_incremental.py
 ### 全量重建库
 
 ```bash
-PYTHONPATH=src python3 scripts/build_library.py
+PYTHONPATH=src python3 scripts/build_library.py --source-dir "<你的文章总目录>" --output-dir data/library
 ```
 
 ## 适合分享给别人时一起说明的两句话
 
 ### 如果对方也用 Codex
 
-“把整个项目文件夹拿过去，再把 `skills/guoji-yichan-guancha/SKILL.md` 复制到你自己的 `~/.codex/skills/guoji-yichan-guancha/SKILL.md`，然后在项目根目录里使用。”
+“最简单的是 clone 仓库后运行 `python3 scripts/install_codex_skill.py`。它会自动把 skill 安装到你的 Codex，并写好本机路径。”
 
 ### 如果对方不用 Codex
 
