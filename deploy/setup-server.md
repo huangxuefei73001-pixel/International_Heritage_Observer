@@ -96,6 +96,13 @@ sync_log_dir=/srv/guoji-yichan-guancha/data/sync_logs
 
 - 如果你想继续沿用当前本地“本次新增”目录逻辑，服务器上需要准备等效目录并把 `incoming_source_dir` 指向它
 - 前端通过 `NEXT_PUBLIC_API_BASE_URL=/api` 访问后端，所以 Nginx 要保留 `/api/` 转发
+- 当前网页登录方式是第一版最小实现：
+  - 普通使用者首次打开网页时会自动生成独立访客身份
+  - 每个访客只看到自己的会话和历史
+  - 管理员通过 `/admin/login` 登录
+  - 管理员账号固定为 `admin`
+  - 管理员密码固定为 `admin`
+- 由于后端配置模型目前仍保留 SMTP 字段，如果暂时不用邮箱验证码功能，也仍需在 `.env` 中填写占位值
 
 ## 6. 构建前端
 
@@ -104,6 +111,12 @@ cd /srv/guoji-yichan-guancha/web
 npm install
 npm run build
 ```
+
+说明：
+
+- 前端服务现在统一使用 `next start`
+- 不再依赖 `standalone/server.js`
+- 因此也不需要额外手动复制 `.next/static`
 
 ## 7. 安装 systemd 服务
 
@@ -181,6 +194,6 @@ PYTHONPATH=backend:src python3 scripts/init_web_db.py
 
 - 现在的登录态和管理员校验仍是第一版最小实现，还没有完整生产级认证
 - 管理员更新知识库仍是“手动触发”
-- 用户侧会话列表仍未做完整的服务端恢复接口
+- 用户侧已经支持服务端会话列表和历史恢复，但仍未加入更细的筛选、搜索和删除能力
 - 当前还没有数据库迁移系统，仍以初始化脚本为主
 - 第一版默认使用 SQLite，适合当前轻量用户规模；后续用户变多后可再切 PostgreSQL

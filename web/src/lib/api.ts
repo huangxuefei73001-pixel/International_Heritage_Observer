@@ -24,12 +24,37 @@ export type VerifyCodeResponse = {
   verified: boolean;
 };
 
+export type PasswordLoginResponse = VerifyCodeResponse;
+
 export type AdminConversation = {
   conversation_id: number;
   title: string;
   user_email: string;
   created_at: string;
   updated_at: string;
+};
+
+export type ConversationSummary = {
+  conversation_id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ConversationMessage = {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+  sources: SourceCard[];
+};
+
+export type ConversationDetail = {
+  conversation_id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  messages: ConversationMessage[];
 };
 
 export type RefreshLibraryResponse = {
@@ -55,7 +80,7 @@ type RequestOptions = RequestInit & {
   debugUserEmail?: string;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 
 async function readJsonError(
   response: Response,
@@ -119,6 +144,16 @@ export function verifyLoginCode(email: string, code: string): Promise<VerifyCode
   });
 }
 
+export function passwordLogin(
+  username: string,
+  password: string,
+): Promise<PasswordLoginResponse> {
+  return requestJson<PasswordLoginResponse>("/auth/password-login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
 export function fetchAdminConversations(debugUserEmail: string): Promise<AdminConversation[]> {
   return requestJson<AdminConversation[]>("/admin/conversations", {
     method: "GET",
@@ -129,6 +164,25 @@ export function fetchAdminConversations(debugUserEmail: string): Promise<AdminCo
 export function refreshKnowledgeBase(debugUserEmail: string): Promise<RefreshLibraryResponse> {
   return requestJson<RefreshLibraryResponse>("/admin/refresh-library", {
     method: "POST",
+    debugUserEmail,
+  });
+}
+
+export function fetchUserConversations(
+  debugUserEmail: string,
+): Promise<ConversationSummary[]> {
+  return requestJson<ConversationSummary[]>("/chat/conversations", {
+    method: "GET",
+    debugUserEmail,
+  });
+}
+
+export function fetchConversationDetail(
+  conversationId: number,
+  debugUserEmail: string,
+): Promise<ConversationDetail> {
+  return requestJson<ConversationDetail>(`/chat/conversations/${conversationId}`, {
+    method: "GET",
     debugUserEmail,
   });
 }

@@ -64,6 +64,7 @@ def test_auth_router_registers_expected_endpoints():
 
     assert "/auth/send-code" in paths
     assert "/auth/verify-code" in paths
+    assert "/auth/password-login" in paths
 
 
 def test_build_session_factory_reuses_engine_and_factory(monkeypatch):
@@ -218,3 +219,36 @@ def test_verify_code_returns_admin_for_admin_user(auth_test_context, monkeypatch
     )
     assert verify_response.status_code == 200
     assert verify_response.json()["role"] == "admin"
+
+
+def test_password_login_creates_or_updates_admin_user(auth_test_context):
+    client, session_factory = auth_test_context
+
+    response = client.post(
+        "/auth/password-login",
+        json={"username": "admin", "password": "admin"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "email": "admin",
+        "role": "admin",
+        "verified": True,
+    }
+
+    with session_factory() as db:
+        user = db.execute(select(User).where(User.email == "admin")).scalar_one()
+
+    assert user.role == "admin"
+
+
+def test_password_login_rejects_invalid_credentials(auth_test_context):
+    client, _ = auth_test_context
+
+    response = client.post(
+        "/auth/password-login",
+        json={"username": "admin", "password": "wrong"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid username or password"

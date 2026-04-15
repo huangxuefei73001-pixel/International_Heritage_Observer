@@ -8,9 +8,9 @@ User=ubuntu
 WorkingDirectory=/srv/guoji-yichan-guancha/web
 Environment=NODE_ENV=production
 Environment=HOSTNAME=127.0.0.1
-Environment=PORT=3000
+Environment=PORT=3001
 Environment=NEXT_PUBLIC_API_BASE_URL=/api
-ExecStart=/usr/bin/env node /srv/guoji-yichan-guancha/web/.next/standalone/web/server.js
+ExecStart=/usr/bin/env npm run start
 Restart=always
 RestartSec=5
 

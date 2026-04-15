@@ -1,7 +1,7 @@
 {
-  "article_count": 10,
+  "article_count": 0,
   "skipped_duplicates": 0,
-  "total_article_count": 2451,
+  "total_article_count": 2441,
   "categories": [
     "ICCROM",
     "ICOM",
@@ -19,7 +19,6 @@
     "拉美",
     "新书书讯",
     "日本",
-    "未分类",
     "欧洲",
     "欧洲其他国家",
     "法国",
@@ -28,5 +27,8 @@
     "阿拉伯",
     "非洲",
     "韩国"
-  ]
+  ],
+  "source_dir": "/Users/pauline/Desktop/国际遗产观察/3.26-国际观察mptext抓取/本次新增",
+  "output_dir": "data/library",
+  "synced_at": "2026-04-12T23:03:36"
 }

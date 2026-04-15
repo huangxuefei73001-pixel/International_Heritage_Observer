@@ -28,7 +28,7 @@ class QueryTest(unittest.TestCase):
         self.assertIn("基于库内文章归纳", answer)
         self.assertIn("库内结论：", answer)
         self.assertIn("证据文章：", answer)
-        self.assertIn("可直接用于写作的归纳：", answer)
+        self.assertIn("如果压缩成一句判断：", answer)
         self.assertIn("证据边界：", answer)
         self.assertIn("[一般动态] [韩国召开第48届世界遗产大会联席工作会](https://mp.weixin.qq.com/s/example)", answer)
         self.assertIn("https://mp.weixin.qq.com/s/example", answer)
@@ -119,9 +119,9 @@ class QueryTest(unittest.TestCase):
 
         answer = answer_question("2026年韩国的世界遗产动态有什么？", library_path, limit=5)
 
-        self.assertIn("- [一般动态] [韩国召开第48届世界遗产大会联席工作会](https://mp.weixin.qq.com/s/korea1) | 2026-03-20 11:25 | 韩国 | https://mp.weixin.qq.com/s/korea1", answer)
-        self.assertIn("- [政策动态] [韩国国家遗产厅公布2026年度预算](https://mp.weixin.qq.com/s/korea2) | 2026-01-28 20:30 | 韩国 | https://mp.weixin.qq.com/s/korea2", answer)
-        self.assertIn("- 2026年韩国的世界遗产动态主要集中在", answer)
+        self.assertIn("- [一般动态] [韩国召开第48届世界遗产大会联席工作会](https://mp.weixin.qq.com/s/korea1) | 2026-03-20 11:25 | 韩国", answer)
+        self.assertIn("- [政策动态] [韩国国家遗产厅公布2026年度预算](https://mp.weixin.qq.com/s/korea2) | 2026-01-28 20:30 | 韩国", answer)
+        self.assertIn("如果压缩成一句判断：", answer)
         self.assertIn("证据边界：", answer)
 
     def test_answer_question_formats_title_as_clickable_markdown_link(self) -> None:

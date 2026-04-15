@@ -23,6 +23,18 @@ function formatDateTime(value: string): string {
   });
 }
 
+function formatUserLabel(value: string): string {
+  if (value === "admin") {
+    return "管理员";
+  }
+
+  if (value.endsWith("@guest.local")) {
+    return `访客 · ${value.slice(6, 14)}`;
+  }
+
+  return value;
+}
+
 export function ConversationTable({
   conversations,
   isLoading,
@@ -61,7 +73,7 @@ export function ConversationTable({
                     <strong>{conversation.title}</strong>
                     <span>#{conversation.conversation_id}</span>
                   </td>
-                  <td>{conversation.user_email}</td>
+                  <td>{formatUserLabel(conversation.user_email)}</td>
                   <td>{formatDateTime(conversation.updated_at)}</td>
                 </tr>
               ))}

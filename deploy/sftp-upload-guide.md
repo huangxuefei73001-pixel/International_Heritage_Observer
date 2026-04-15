@@ -69,6 +69,14 @@ cp deploy/server.env.example .env
 - `openrouter_api_key`
 - `smtp_*`
 
+当前这版网页登录规则也一并记住：
+
+- 普通使用者首次打开网页时会自动生成独立访客身份
+- 每个访客只能看到自己的历史和上下文
+- 管理员通过 `/admin/login` 登录
+- 管理员账号固定为 `admin`
+- 管理员密码固定为 `admin`
+
 ### 3.4 准备前端
 
 ```bash
@@ -77,6 +85,12 @@ npm install
 npm run typecheck
 npm run build
 ```
+
+说明：
+
+- 前端服务现在统一使用 `next start`
+- 不再依赖 `standalone/server.js`
+- 因此也不需要手动复制 `.next/static`
 
 ### 3.5 初始化数据库表
 
@@ -89,11 +103,11 @@ PYTHONPATH=backend:src python3 scripts/init_web_db.py
 ### 3.6 安装服务
 
 ```bash
-sudo cp deploy/systemd/backend.service /etc/systemd/system/
-sudo cp deploy/systemd/frontend.service /etc/systemd/system/
+sudo cp deploy/systemd/guoji-yichan-backend.service /etc/systemd/system/
+sudo cp deploy/systemd/guoji-yichan-frontend.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable backend.service frontend.service
-sudo systemctl start backend.service frontend.service
+sudo systemctl enable guoji-yichan-backend.service guoji-yichan-frontend.service
+sudo systemctl start guoji-yichan-backend.service guoji-yichan-frontend.service
 ```
 
 ### 3.7 配置 Nginx
@@ -116,8 +130,8 @@ curl http://127.0.0.1:8000/health
 ### 服务状态
 
 ```bash
-sudo systemctl status backend.service
-sudo systemctl status frontend.service
+sudo systemctl status guoji-yichan-backend.service
+sudo systemctl status guoji-yichan-frontend.service
 ```
 
 ### 前端能否打开
@@ -130,5 +144,5 @@ curl -I http://127.0.0.1
 
 - 现在仍是第一版最小登录态，不是完整生产级鉴权
 - 管理员仍通过最小机制访问后台
-- 用户侧完整“历史会话恢复”还没有服务端列表接口
+- 用户侧已经支持历史会话恢复，但还没有搜索、删除、重命名等管理能力
 - 更新知识库仍然是手动触发

@@ -9,6 +9,7 @@ import {
   type AdminConversation,
   type RefreshLibraryResponse,
 } from "@/lib/api";
+import { getStoredSession } from "@/lib/session";
 
 import { ConversationTable } from "./conversation-table";
 import { SyncPanel } from "./sync-panel";
@@ -26,18 +27,16 @@ export function AdminShell() {
   const [syncSummary, setSyncSummary] = useState<RefreshLibraryResponse | null>(null);
 
   useEffect(() => {
-    const role = window.localStorage.getItem("heritage-user-role");
-    const email = window.localStorage.getItem("heritage-user-email");
-
-    if (role !== "admin" || !email) {
-      router.replace("/chat");
+    const session = getStoredSession();
+    if (!session || session.role !== "admin") {
+      router.replace("/admin/login");
       return;
     }
 
-    setAdminEmail(email);
+    setAdminEmail(session.email);
     setIsCheckingAccess(false);
 
-    void loadConversations(email);
+    void loadConversations(session.email);
   }, [router]);
 
   async function loadConversations(debugUserEmail: string) {
@@ -82,7 +81,6 @@ export function AdminShell() {
     return (
       <section className="admin-shell admin-shell--loading" aria-live="polite">
         <div className="admin-shell__loading-card">
-          <span className="badge">Admin console</span>
           <p className="admin-shell__loading-text">正在进入管理员后台…</p>
         </div>
       </section>
@@ -92,10 +90,10 @@ export function AdminShell() {
   return (
     <section className="admin-shell">
       <header className="admin-shell__intro">
-        <span className="badge">Admin console</span>
-        <h1 className="admin-shell__title">安静的后台，只处理两件事。</h1>
+        <span className="admin-shell__eyebrow">管理员视图</span>
+        <h1 className="admin-shell__title">查看全部提问，必要时手动更新知识库。</h1>
         <p className="admin-shell__lede">
-          管理员可以查看全部对话，并在需要时手动更新知识库。界面沿用深蓝山野方向，但更克制、更留白。
+          普通使用者只看到自己的上下文和历史；管理员在这里看到全部对话，并掌握当前库的更新入口。
         </p>
       </header>
 
