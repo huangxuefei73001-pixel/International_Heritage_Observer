@@ -14,6 +14,7 @@ The workflow is evidence-first:
 - interpret the natural-language question
 - identify the user task shape: concept, trend, case, or dynamic
 - identify evidence dimensions such as `报告资源` / `书刊资讯` / `会议新闻` / `政策动态` / `一般动态`
+- keep `STRICT_SOURCE_MODE` on: only use the local `国际遗产观察` knowledge base and, when needed for heritage-site case lookup, official UNESCO `whc001` data
 - query the local article library
 - answer from matching articles only
 - state limits when the library is insufficient
@@ -40,6 +41,24 @@ PYTHONPATH=__REPO_ROOT__/src python3 __REPO_ROOT__/scripts/query_library.py "<us
    - concept questions should prefer reports and books over meeting notices
    - trend questions should combine reports, policy updates, and representative news
    - case questions should prefer concrete place-based or measure-based items over general announcements
+7. When the user explicitly asks for `世界遗产地案例` / `heritage site cases`, keep the main theme as the first retrieval priority and treat `世界遗产地` as the case carrier.
+8. If no stable heritage-site case is found, ask a clarification question instead of fabricating examples.
+9. If the user replies with clarification options such as `A / B / C / D` or a narrowed `1 / 2 / 3`, treat that reply as retrieval input for the next round rather than as a standalone question.
+
+## Clarification Flow
+
+For case-oriented theme questions, the skill may narrow scope in stages.
+
+- first-layer options:
+  - `A` = 洪水 / 海平面上升
+  - `B` = 火灾 / 林火
+  - `C` = 战争 / 突发灾害
+  - `D` = 城市更新与长期风险治理
+- second-layer options:
+  - after a valid first-layer choice, `1 / 2 / 3` further narrow the risk scene
+
+When the user answers with only one option letter or number, continue retrieval using that narrowed scope.
+Do not repeat the same clarification prompt after a valid option has already been given.
 
 ## Refreshing The Library
 

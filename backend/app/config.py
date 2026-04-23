@@ -16,3 +16,4 @@ class Settings(BaseSettings):
     library_path: str = "data/library/articles.jsonl"
     incoming_source_dir: str = "/Users/pauline/Desktop/国际遗产观察/3.26-国际观察mptext抓取/本次新增"
     sync_log_dir: str = "data/sync_logs"
+    strict_source_mode: bool = True

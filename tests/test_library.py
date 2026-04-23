@@ -2,6 +2,7 @@ import unittest
 from datetime import datetime
 import importlib.util
 from pathlib import Path
+import shutil
 
 from guoji_yichan_guancha.models import ArticleRecord
 from guoji_yichan_guancha.library import build_library
@@ -70,22 +71,28 @@ class BuildLibraryTest(unittest.TestCase):
         self.assertEqual(second["total_article_count"], 1)
 
     def test_sync_incremental_writes_run_log(self) -> None:
-        source_dir = Path("tests/fixtures")
+        fixture_dir = Path("tests/fixtures")
+        source_dir = Path("tests/tmp/sync-source")
         output_dir = Path("tests/tmp/library-sync")
         log_dir = Path("tests/tmp/sync-logs")
+        archive_dir = Path("tests/tmp/sync-archive")
 
-        for target in (output_dir, log_dir):
+        for target in (source_dir, output_dir, log_dir, archive_dir):
             if target.exists():
                 for path in sorted(target.rglob("*"), reverse=True):
                     if path.is_file():
                         path.unlink()
                     elif path.is_dir():
                         path.rmdir()
+        source_dir.mkdir(parents=True, exist_ok=True)
+        for path in fixture_dir.glob("*.docx"):
+            shutil.copy2(path, source_dir / path.name)
 
         result = sync_incremental(
             source_dir,
             output_dir,
             log_dir,
+            archive_dir,
             run_at=datetime(2026, 4, 9, 15, 30, 0),
         )
 
@@ -93,6 +100,10 @@ class BuildLibraryTest(unittest.TestCase):
         self.assertTrue((output_dir / "articles.jsonl").exists())
         self.assertTrue((log_dir / "20260409-153000.json").exists())
         self.assertEqual(result["log_path"], str(log_dir / "20260409-153000.json"))
+        self.assertEqual(result["archive_dir"], str(archive_dir))
+        self.assertEqual(result["moved_source_files"], 1)
+        self.assertTrue((archive_dir / "20260409-153000" / "sample_article.docx").exists())
+        self.assertEqual(len(list(source_dir.glob("*.docx"))), 0)
 
     def test_sync_script_defaults_to_benci_xinzeng_directory(self) -> None:
         script_path = Path("scripts/sync_incremental.py")
@@ -105,6 +116,10 @@ class BuildLibraryTest(unittest.TestCase):
         self.assertEqual(
             module.DEFAULT_SOURCE_DIR,
             Path("/Users/pauline/Desktop/国际遗产观察/3.26-国际观察mptext抓取/本次新增"),
+        )
+        self.assertEqual(
+            module.DEFAULT_ARCHIVE_DIR,
+            Path("/Users/pauline/Desktop/国际遗产观察/3.26-国际观察mptext抓取/已同步归档"),
         )
 
 

@@ -13,8 +13,16 @@ from app.deps import get_db_session, get_settings
 from app.models import Conversation, Message, User
 from app.schemas import AskRequest, AskResponse, ConversationDetail, ConversationMessage, ConversationSummary
 from app.services.query_service import answer_from_library
+from guoji_yichan_guancha.query import (
+    inject_risk_scene_detail_option,
+    inject_risk_scene_option,
+    normalize_clarification_option,
+    normalize_follow_up_option,
+)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+RISK_SCENE_CLARIFICATION_MARKER = "请问你希望聚焦哪类风险场景？"
+RISK_SCENE_DETAIL_CLARIFICATION_MARKER = "如果你愿意，我们可以继续缩小到更具体的一层："
 
 
 def _require_user(
@@ -44,6 +52,28 @@ def _parse_sources(value: str | None) -> list[dict]:
     except json.JSONDecodeError:
         return []
     return parsed if isinstance(parsed, list) else []
+
+
+def _build_effective_question(raw_question: str, messages: list[Message]) -> str:
+    last_assistant = next((message for message in reversed(messages) if message.role == "assistant"), None)
+    if last_assistant is None:
+        return raw_question
+    option = normalize_clarification_option(raw_question)
+    if option and RISK_SCENE_CLARIFICATION_MARKER in last_assistant.content:
+        for message in reversed(messages):
+            if message.role == "user":
+                return inject_risk_scene_option(message.content, option)
+        return raw_question
+    detail_option = normalize_follow_up_option(raw_question)
+    if not detail_option or RISK_SCENE_DETAIL_CLARIFICATION_MARKER not in last_assistant.content:
+        return raw_question
+    for message in reversed(messages):
+        if message.role == "user":
+            parent_marker = next((char for char in "ABCD" if f"[风险场景{char}]" in message.content), None)
+            if parent_marker:
+                return inject_risk_scene_detail_option(message.content, parent_marker, detail_option)
+            return raw_question
+    return raw_question
 
 
 @router.get("/conversations", response_model=list[ConversationSummary])
@@ -135,6 +165,7 @@ def ask(
 
     with db.begin():
         user = _require_user(x_debug_user, db)
+        existing_messages: list[Message] = []
 
         if payload.conversation_id is None:
             conversation = Conversation(user_id=user.id, title=payload.question[:255])
@@ -148,6 +179,17 @@ def ask(
             ).scalars().first()
             if conversation is None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Conversation not found")
+            existing_messages = (
+                db.execute(
+                    select(Message)
+                    .where(Message.conversation_id == conversation.id)
+                    .order_by(Message.id.asc())
+                )
+                .scalars()
+                .all()
+            )
+
+        effective_question = _build_effective_question(payload.question, existing_messages)
 
         db.add(
             Message(
@@ -157,7 +199,11 @@ def ask(
             )
         )
     try:
-        result = answer_from_library(payload.question, library_path)
+        result = answer_from_library(
+            effective_question,
+            library_path,
+            strict_source_mode=settings.strict_source_mode,
+        )
     except Exception as exc:  # pragma: no cover - controlled failure path
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

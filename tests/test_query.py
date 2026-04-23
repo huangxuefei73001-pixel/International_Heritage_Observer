@@ -1,11 +1,31 @@
 from pathlib import Path
 from datetime import date
 import unittest
+from unittest.mock import patch
 
-from guoji_yichan_guancha.query import answer_question, infer_evidence_type
+from guoji_yichan_guancha.query import (
+    _select_answer_context,
+    _filter_unesco_world_heritage_sites,
+    answer_question,
+    detect_document_source_type,
+    infer_evidence_type,
+    is_document_from_allowed_source,
+)
 
 
 class QueryTest(unittest.TestCase):
+    def test_source_whitelist_accepts_only_kb_and_unesco_api(self) -> None:
+        kb_document = {"channel": "国际遗产观察"}
+        unesco_document = {"source_system": "whc001"}
+        foreign_document = {"channel": "外部资料库", "source_system": "other"}
+
+        self.assertEqual(detect_document_source_type(kb_document), "KB")
+        self.assertEqual(detect_document_source_type(unesco_document), "UNESCO_API")
+        self.assertIsNone(detect_document_source_type(foreign_document))
+        self.assertTrue(is_document_from_allowed_source(kb_document))
+        self.assertTrue(is_document_from_allowed_source(unesco_document))
+        self.assertFalse(is_document_from_allowed_source(foreign_document))
+
     def test_infer_evidence_type_distinguishes_report_book_and_meeting(self) -> None:
         report = {"title": "【报告】世界遗产影响评估研究", "category": "报告研究", "content_text": ""}
         book = {"title": "【新书】世界遗产导论", "category": "新书书讯", "content_text": ""}
@@ -123,6 +143,346 @@ class QueryTest(unittest.TestCase):
         self.assertIn("- [政策动态] [韩国国家遗产厅公布2026年度预算](https://mp.weixin.qq.com/s/korea2) | 2026-01-28 20:30 | 韩国", answer)
         self.assertIn("如果压缩成一句判断：", answer)
         self.assertIn("证据边界：", answer)
+
+    @patch("guoji_yichan_guancha.query.searchWorldHeritageSites")
+    def test_question_understanding_keeps_resilience_and_disaster_governance_as_primary_theme(self, mock_search) -> None:
+        mock_search.return_value = [
+            {
+                "site_name": "威尼斯及其泻湖",
+                "country": "意大利",
+                "inscription_year": 1987,
+                "unesco_url": "https://whc.unesco.org/en/list/394",
+                "matched_terms": ["climate", "risk"],
+            }
+        ]
+        library_path = Path("tests/tmp/articles_resilience_case_carrier.jsonl")
+        library_path.parent.mkdir(parents=True, exist_ok=True)
+        library_path.write_text(
+            "\n".join(
+                [
+                    '{"article_id":"1","title":"UNESCO发布世界遗产城市灾害风险治理案例集","published_at":"2025-03-10 20:30","channel":"国际遗产观察","category":"UNESCO","source_url":"https://mp.weixin.qq.com/s/resilience-1","local_source_path":"/tmp/a.docx","content_text":"文章讨论城市韧性、灾害治理与世界遗产地案例之间的关系。","content_html_excerpt":"<p>a</p>","parse_status":"ok","tags_auto":["城市韧性","灾害治理","世界遗产"]}',
+                    '{"article_id":"2","title":"历史城区韧性提升与灾害治理国际培训总结","published_at":"2024-08-01 20:30","channel":"国际遗产观察","category":"会议新闻","source_url":"https://mp.weixin.qq.com/s/resilience-2","local_source_path":"/tmp/b.docx","content_text":"该文梳理历史城区和世界遗产地如何把灾害风险治理纳入韧性框架。","content_html_excerpt":"<p>b</p>","parse_status":"ok","tags_auto":["城市韧性","灾害风险治理"]}',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        answer = answer_question(
+            "我需要找城市韧性与灾害治理的信息，包括世界遗产地案例",
+            library_path,
+            limit=5,
+        )
+
+        self.assertIn("城市韧性与灾害治理", answer)
+        self.assertIn("把世界遗产地作为案例载体", answer)
+        self.assertNotIn("与“世界遗产案例”直接相关的代表性做法", answer)
+
+    @patch("guoji_yichan_guancha.query.searchWorldHeritageSites")
+    def test_theme_led_query_prioritizes_resilience_and_uses_evidence_derived_headings(self, mock_search) -> None:
+        mock_search.return_value = [
+            {
+                "site_name": "威尼斯及其泻湖",
+                "country": "意大利",
+                "inscription_year": 1987,
+                "unesco_url": "https://whc.unesco.org/en/list/394",
+                "matched_terms": ["climate", "risk"],
+            },
+            {
+                "site_name": "巴米扬山谷的文化景观和考古遗迹",
+                "country": "阿富汗",
+                "inscription_year": 2003,
+                "unesco_url": "https://whc.unesco.org/en/list/208",
+                "matched_terms": ["disaster", "risk"],
+            },
+        ]
+        library_path = Path("tests/tmp/articles_theme_led_query.jsonl")
+        library_path.parent.mkdir(parents=True, exist_ok=True)
+        library_path.write_text(
+            "\n".join(
+                [
+                    '{"article_id":"1","title":"UNESCO同世界旅游组织UNWTO加强合作","published_at":"2026-03-21 11:25","channel":"国际遗产观察","category":"UNESCO","source_url":"https://mp.weixin.qq.com/s/generic-1","local_source_path":"/tmp/a.docx","content_text":"推动全球可持续、包容和有韧性的旅游，并涉及世界遗产合作。","content_html_excerpt":"<p>a</p>","parse_status":"ok","tags_auto":["世界遗产"]}',
+                    '{"article_id":"2","title":"埃及世界遗产地卢克索发现完整古罗马城市和鸽子塔遗址","published_at":"2023-01-28 20:30","channel":"国际遗产观察","category":"非洲","source_url":"https://mp.weixin.qq.com/s/generic-2","local_source_path":"/tmp/b.docx","content_text":"这是一条世界遗产地一般动态。","content_html_excerpt":"<p>b</p>","parse_status":"ok","tags_auto":["世界遗产地"]}',
+                    '{"article_id":"3","title":"世界遗产城市韧性与灾害风险治理框架发布","published_at":"2025-03-10 20:30","channel":"国际遗产观察","category":"报告资源","source_url":"https://mp.weixin.qq.com/s/theme-1","local_source_path":"/tmp/c.docx","content_text":"文章系统讨论城市韧性、灾害风险、风险治理与世界遗产城市管理框架。","content_html_excerpt":"<p>c</p>","parse_status":"ok","tags_auto":["城市韧性","灾害风险治理","世界遗产"]}',
+                    '{"article_id":"4","title":"历史城区灾害应急保护与恢复机制研究","published_at":"2024-08-01 20:30","channel":"国际遗产观察","category":"研究","source_url":"https://mp.weixin.qq.com/s/theme-2","local_source_path":"/tmp/d.docx","content_text":"聚焦灾害、应急、恢复和世界遗产地保护机制。","content_html_excerpt":"<p>d</p>","parse_status":"ok","tags_auto":["灾害","应急","恢复"]}',
+                    '{"article_id":"5","title":"气候风险下的遗产地脆弱性评估与恢复路径","published_at":"2024-05-12 20:30","channel":"国际遗产观察","category":"报告资源","source_url":"https://mp.weixin.qq.com/s/theme-3","local_source_path":"/tmp/e.docx","content_text":"围绕风险、脆弱性、恢复和治理提出遗产地案例。","content_html_excerpt":"<p>e</p>","parse_status":"ok","tags_auto":["风险","脆弱性","恢复"]}',
+                    '{"article_id":"6","title":"世界遗产地防灾与风险管理案例汇编","published_at":"2023-11-06 20:30","channel":"国际遗产观察","category":"报告资源","source_url":"https://mp.weixin.qq.com/s/theme-4","local_source_path":"/tmp/f.docx","content_text":"介绍防灾、灾害治理、风险管理和多个世界遗产地案例。","content_html_excerpt":"<p>f</p>","parse_status":"ok","tags_auto":["防灾","风险管理","世界遗产地"]}',
+                    '{"article_id":"7","title":"城市遗产地图集更新","published_at":"2024-02-13 20:30","channel":"国际遗产观察","category":"UNESCO","source_url":"https://mp.weixin.qq.com/s/generic-3","local_source_path":"/tmp/g.docx","content_text":"介绍城市遗产地图平台。","content_html_excerpt":"<p>g</p>","parse_status":"ok","tags_auto":["城市遗产"]}',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        context = _select_answer_context(
+            "我需要找城市韧性与灾害治理的信息，包括世界遗产地案例",
+            library_path,
+            limit=5,
+        )
+        top_titles = [document["title"] for document in context["matches"]]
+        extended_titles = [document["title"] for document in context["extended_matches"]]
+
+        self.assertIn("世界遗产城市韧性与灾害风险治理框架发布", top_titles[:3])
+        self.assertIn("历史城区灾害应急保护与恢复机制研究", top_titles[:4])
+        self.assertNotIn("UNESCO同世界旅游组织UNWTO加强合作", top_titles[:3])
+        self.assertGreater(len(extended_titles), len(top_titles))
+
+        answer = answer_question(
+            "我需要找城市韧性与灾害治理的信息，包括世界遗产地案例",
+            library_path,
+            limit=5,
+        )
+
+        self.assertIn("城市韧性与风险治理：", answer)
+        self.assertIn("灾害应对与应急保护：", answer)
+        self.assertIn("脆弱性与恢复机制：", answer)
+        self.assertNotIn("国际治理与规则：", answer)
+        self.assertNotIn("培训与能力建设：", answer)
+        self.assertNotIn("规划与管理工具：", answer)
+        self.assertNotIn("5条库内线索", answer)
+        self.assertNotIn("条库内线索", answer)
+
+    def test_theme_led_query_prefers_theme_plus_heritage_cases_in_core_selection(self) -> None:
+        library_path = Path("tests/tmp/articles_theme_heritage_constraint.jsonl")
+        library_path.parent.mkdir(parents=True, exist_ok=True)
+        library_path.write_text(
+            "\n".join(
+                [
+                    '{"article_id":"1","title":"城市韧性与灾害风险治理框架综述","published_at":"2025-03-10 20:30","channel":"国际遗产观察","category":"报告资源","source_url":"https://mp.weixin.qq.com/s/theme-only","local_source_path":"/tmp/a.docx","content_text":"系统讨论城市韧性、灾害风险、治理和恢复框架。","content_html_excerpt":"<p>a</p>","parse_status":"ok","tags_auto":["城市韧性","灾害风险治理"]}',
+                    '{"article_id":"2","title":"世界遗产地防灾与风险管理案例汇编","published_at":"2024-06-01 20:30","channel":"国际遗产观察","category":"报告资源","source_url":"https://mp.weixin.qq.com/s/theme-case","local_source_path":"/tmp/b.docx","content_text":"介绍世界遗产地、防灾、风险管理与灾害治理案例。","content_html_excerpt":"<p>b</p>","parse_status":"ok","tags_auto":["世界遗产地","防灾","风险管理"]}',
+                    '{"article_id":"3","title":"历史城区灾害应急保护与恢复机制研究","published_at":"2024-05-12 20:30","channel":"国际遗产观察","category":"研究","source_url":"https://mp.weixin.qq.com/s/theme-case-2","local_source_path":"/tmp/c.docx","content_text":"聚焦灾害、应急、恢复和世界遗产地保护机制。","content_html_excerpt":"<p>c</p>","parse_status":"ok","tags_auto":["灾害","应急","恢复","世界遗产地"]}',
+                ])
+            + "\n",
+            encoding="utf-8",
+        )
+
+        context = _select_answer_context(
+            "我需要找城市韧性与灾害治理的信息，包括世界遗产地案例",
+            library_path,
+            limit=2,
+        )
+        top_titles = [document["title"] for document in context["matches"]]
+
+        self.assertEqual(top_titles[0], "世界遗产地防灾与风险管理案例汇编")
+        self.assertIn("历史城区灾害应急保护与恢复机制研究", top_titles)
+        self.assertNotIn("城市韧性与灾害风险治理框架综述", top_titles)
+
+    @patch("guoji_yichan_guancha.query.searchWorldHeritageSites")
+    def test_theme_led_query_without_heritage_cases_returns_clarification_question(self, mock_search) -> None:
+        mock_search.return_value = []
+        library_path = Path("tests/tmp/articles_theme_no_cases.jsonl")
+        library_path.parent.mkdir(parents=True, exist_ok=True)
+        library_path.write_text(
+            "\n".join(
+                [
+                    '{"article_id":"1","title":"城市韧性与灾害风险治理框架综述","published_at":"2025-03-10 20:30","channel":"国际遗产观察","category":"报告资源","source_url":"https://mp.weixin.qq.com/s/theme-only-1","local_source_path":"/tmp/a.docx","content_text":"系统讨论城市韧性、灾害风险、治理和恢复框架。","content_html_excerpt":"<p>a</p>","parse_status":"ok","tags_auto":["城市韧性","灾害风险治理"]}',
+                    '{"article_id":"2","title":"历史城区灾害应急保护与恢复机制研究","published_at":"2024-05-12 20:30","channel":"国际遗产观察","category":"研究","source_url":"https://mp.weixin.qq.com/s/theme-only-2","local_source_path":"/tmp/b.docx","content_text":"聚焦灾害、应急、恢复和保护机制。","content_html_excerpt":"<p>b</p>","parse_status":"ok","tags_auto":["灾害","应急","恢复"]}',
+                ])
+            + "\n",
+            encoding="utf-8",
+        )
+
+        answer = answer_question(
+            "我需要找城市韧性与灾害治理的信息，包括世界遗产地案例",
+            library_path,
+            limit=5,
+        )
+
+        self.assertIn("当前在UNESCO数据中未检索到与该主题直接匹配的世界遗产地案例。", answer)
+
+    @patch("guoji_yichan_guancha.query.searchWorldHeritageSites")
+    def test_theme_led_query_appends_unesco_cases_when_search_returns_results(self, mock_search) -> None:
+        mock_search.return_value = [
+            {
+                "site_name": "威尼斯及其泻湖",
+                "country": "意大利",
+                "inscription_year": 1987,
+                "unesco_url": "https://whc.unesco.org/en/list/394",
+                "matched_terms": ["climate", "risk"],
+            },
+            {
+                "site_name": "巴米扬山谷的文化景观和考古遗迹",
+                "country": "阿富汗",
+                "inscription_year": 2003,
+                "unesco_url": "https://whc.unesco.org/en/list/208",
+                "matched_terms": ["disaster", "risk"],
+            },
+        ]
+        library_path = Path("tests/tmp/articles_theme_with_unesco_append.jsonl")
+        library_path.parent.mkdir(parents=True, exist_ok=True)
+        library_path.write_text(
+            "\n".join(
+                [
+                    '{"article_id":"1","title":"世界遗产城市韧性与灾害风险治理框架发布","published_at":"2025-03-10 20:30","channel":"国际遗产观察","category":"报告资源","source_url":"https://mp.weixin.qq.com/s/theme-kb-1","local_source_path":"/tmp/a.docx","content_text":"文章系统讨论城市韧性、灾害风险、风险治理与世界遗产城市管理框架。","content_html_excerpt":"<p>a</p>","parse_status":"ok","tags_auto":["城市韧性","灾害风险治理","世界遗产"]}',
+                    '{"article_id":"2","title":"历史城区灾害应急保护与恢复机制研究","published_at":"2024-08-01 20:30","channel":"国际遗产观察","category":"研究","source_url":"https://mp.weixin.qq.com/s/theme-kb-2","local_source_path":"/tmp/b.docx","content_text":"聚焦灾害、应急、恢复和世界遗产地保护机制。","content_html_excerpt":"<p>b</p>","parse_status":"ok","tags_auto":["灾害","应急","恢复","世界遗产地"]}',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        answer = answer_question(
+            "我需要找城市韧性与灾害治理的信息，包括世界遗产地案例",
+            library_path,
+            limit=5,
+        )
+
+        mock_search.assert_called_once()
+        self.assertIn("相关世界遗产地案例（UNESCO）：", answer)
+        self.assertIn("威尼斯及其泻湖", answer)
+        self.assertIn("意大利", answer)
+        self.assertIn("巴米扬山谷的文化景观和考古遗迹", answer)
+
+    @patch("guoji_yichan_guancha.query.searchWorldHeritageSites")
+    def test_theme_led_query_returns_unesco_clarification_when_api_has_no_cases(self, mock_search) -> None:
+        mock_search.return_value = []
+        library_path = Path("tests/tmp/articles_theme_with_unesco_fallback.jsonl")
+        library_path.parent.mkdir(parents=True, exist_ok=True)
+        library_path.write_text(
+            "\n".join(
+                [
+                    '{"article_id":"1","title":"世界遗产城市韧性与灾害风险治理框架发布","published_at":"2025-03-10 20:30","channel":"国际遗产观察","category":"报告资源","source_url":"https://mp.weixin.qq.com/s/theme-kb-3","local_source_path":"/tmp/a.docx","content_text":"文章系统讨论城市韧性、灾害风险、风险治理与世界遗产城市管理框架。","content_html_excerpt":"<p>a</p>","parse_status":"ok","tags_auto":["城市韧性","灾害风险治理","世界遗产"]}',
+                    '{"article_id":"2","title":"历史城区灾害应急保护与恢复机制研究","published_at":"2024-08-01 20:30","channel":"国际遗产观察","category":"研究","source_url":"https://mp.weixin.qq.com/s/theme-kb-4","local_source_path":"/tmp/b.docx","content_text":"聚焦灾害、应急、恢复和世界遗产地保护机制。","content_html_excerpt":"<p>b</p>","parse_status":"ok","tags_auto":["灾害","应急","恢复","世界遗产地"]}',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        answer = answer_question(
+            "我需要找城市韧性与灾害治理的信息，包括世界遗产地案例",
+            library_path,
+            limit=5,
+        )
+
+        self.assertIn("当前在UNESCO数据中未检索到与该主题直接匹配的世界遗产地案例。", answer)
+        self.assertIn("请问你希望聚焦哪类风险场景？", answer)
+
+    def test_unesco_filter_rejects_weak_climate_or_adaptability_mentions(self) -> None:
+        weak_record = {
+            "name_zh": "喀尔巴阡山脉及欧洲其它地区的原始山毛榉林",
+            "states_names": ["Germany"],
+            "date_inscribed": 2007,
+            "description_en": "The successful expansion across a whole continent is related to the tree’s adaptability and tolerance of different climatic conditions.",
+            "short_description_en": "",
+            "justification_en": "",
+            "danger": "False",
+            "id_no": 1133,
+        }
+
+        self.assertEqual(_filter_unesco_world_heritage_sites([weak_record]), [])
+
+    def test_unesco_filter_keeps_strong_threat_plus_response_matches(self) -> None:
+        strong_record = {
+            "name_zh": "示例遗产地",
+            "states_names": ["Exampleland"],
+            "date_inscribed": 1999,
+            "description_en": "The property faces major climate risk and flood pressure.",
+            "short_description_en": "Its conservation management and adaptation strategy address these threats.",
+            "justification_en": "",
+            "danger": False,
+            "id_no": 9999,
+        }
+
+        matches = _filter_unesco_world_heritage_sites([strong_record])
+
+        self.assertEqual(len(matches), 1)
+        self.assertIn("climate", matches[0]["matched_terms"])
+        self.assertIn("risk", matches[0]["matched_terms"])
+        self.assertIn("adaptation", matches[0]["matched_terms"])
+        self.assertIn("风险信号", matches[0]["relevance_reason"])
+
+    def test_unesco_filter_prefers_query_aligned_case(self) -> None:
+        analysis = {
+            "primary_theme_terms": ["城市韧性", "灾害治理"],
+            "case_carrier_terms": ["世界遗产地", "世界遗产"],
+        }
+        aligned_record = {
+            "name_zh": "主题匹配遗产地",
+            "states_names": ["Exampleland"],
+            "date_inscribed": 1999,
+            "description_en": "The property faces climate risk and flood pressure.",
+            "short_description_en": "Its resilience and recovery strategy supports emergency governance.",
+            "justification_en": "",
+            "danger": False,
+            "id_no": 1001,
+        }
+        weak_record = {
+            "name_zh": "弱相关遗产地",
+            "states_names": ["Exampleland"],
+            "date_inscribed": 1998,
+            "description_en": "The property is affected by climate and fire patterns.",
+            "short_description_en": "",
+            "justification_en": "",
+            "danger": False,
+            "id_no": 1002,
+        }
+
+        matches = _filter_unesco_world_heritage_sites([weak_record, aligned_record], analysis=analysis)
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["site_name"], "主题匹配遗产地")
+        self.assertIn("命中主题", matches[0]["relevance_reason"])
+
+    @patch("guoji_yichan_guancha.query.searchWorldHeritageSites")
+    def test_selected_risk_scene_without_unesco_cases_returns_kb_answer_plus_follow_up(self, mock_search) -> None:
+        mock_search.return_value = []
+        library_path = Path("tests/tmp/articles_scene_follow_up.jsonl")
+        library_path.parent.mkdir(parents=True, exist_ok=True)
+        library_path.write_text(
+            "\n".join(
+                [
+                    '{"article_id":"1","title":"OWHC报告：城市遗产风险管理","published_at":"2023-04-04 20:30","channel":"国际遗产观察","category":"报告资源","source_url":"https://mp.weixin.qq.com/s/scene-1","local_source_path":"/tmp/a.docx","content_text":"文章讨论洪水、海平面上升与城市遗产风险管理。","content_html_excerpt":"<p>a</p>","parse_status":"ok","tags_auto":["洪水","风险管理"]}',
+                    '{"article_id":"2","title":"气候脆弱性指数在非洲世界遗产的应用研究","published_at":"2024-05-12 20:30","channel":"国际遗产观察","category":"报告资源","source_url":"https://mp.weixin.qq.com/s/scene-2","local_source_path":"/tmp/b.docx","content_text":"围绕海平面上升、气候风险和脆弱性评估展开。","content_html_excerpt":"<p>b</p>","parse_status":"ok","tags_auto":["海平面上升","气候风险"]}',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        answer = answer_question(
+            "我需要找城市韧性与灾害治理的信息，包括世界遗产地案例\n[风险场景A] 洪水 / 海平面上升：洪水 / 海平面上升 / flood / sea level rise / coastal risk / lagoon / water",
+            library_path,
+            limit=5,
+        )
+
+        self.assertIn("OWHC报告：城市遗产风险管理", answer)
+        self.assertIn("当前在UNESCO数据中仍未检索到与“洪水 / 海平面上升”直接匹配的稳定世界遗产地案例。", answer)
+        self.assertIn("泻湖 / 港口城市与海平面上升", answer)
+        self.assertNotIn("请问你希望聚焦哪类风险场景？", answer)
+
+    @patch("guoji_yichan_guancha.query.searchWorldHeritageSites")
+    def test_selected_second_layer_scene_without_unesco_cases_returns_narrowed_kb_answer_plus_more_specific_follow_up(
+        self,
+        mock_search,
+    ) -> None:
+        mock_search.return_value = []
+        library_path = Path("tests/tmp/articles_scene_detail_follow_up.jsonl")
+        library_path.parent.mkdir(parents=True, exist_ok=True)
+        library_path.write_text(
+            "\n".join(
+                [
+                    '{"article_id":"1","title":"威尼斯泻湖与海平面上升风险研究","published_at":"2024-04-04 20:30","channel":"国际遗产观察","category":"报告资源","source_url":"https://mp.weixin.qq.com/s/detail-1","local_source_path":"/tmp/a.docx","content_text":"文章讨论 lagoon、port city、sea level rise 与 coastal flooding 对遗产城市的影响。","content_html_excerpt":"<p>a</p>","parse_status":"ok","tags_auto":["lagoon","sea level rise"]}',
+                    '{"article_id":"2","title":"港口城市潮汐水位与遗产保护治理","published_at":"2024-05-12 20:30","channel":"国际遗产观察","category":"研究","source_url":"https://mp.weixin.qq.com/s/detail-2","local_source_path":"/tmp/b.docx","content_text":"围绕 tidal water、港口城市和长期风险治理展开。","content_html_excerpt":"<p>b</p>","parse_status":"ok","tags_auto":["port city","tidal water"]}',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        answer = answer_question(
+            "我需要找城市韧性与灾害治理的信息，包括世界遗产地案例\n"
+            "[风险场景A] 洪水 / 海平面上升：洪水 / 海平面上升 / flood / sea level rise / coastal risk / lagoon / water\n"
+            "[风险子场景A-1] 泻湖 / 港口城市与海平面上升：lagoon / port city / sea level rise / coastal flooding / tidal water",
+            library_path,
+            limit=5,
+        )
+
+        self.assertIn("威尼斯泻湖与海平面上升风险研究", answer)
+        self.assertIn("当前在UNESCO数据中仍未检索到与“泻湖 / 港口城市与海平面上升”直接匹配的稳定世界遗产地案例。", answer)
+        self.assertIn("a. 你更想看泻湖城市本体的水位风险，还是港口防洪设施？", answer)
+        self.assertNotIn("1. 泻湖 / 港口城市与海平面上升", answer)
+        self.assertNotIn("2. 洪水防御、排水系统与城市遗产", answer)
 
     def test_answer_question_formats_title_as_clickable_markdown_link(self) -> None:
         library_path = Path("tests/tmp/articles_linked_titles.jsonl")

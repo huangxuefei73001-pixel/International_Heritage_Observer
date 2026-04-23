@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import date, datetime
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 
 DOMAIN_PHRASES = [
@@ -152,6 +156,214 @@ COMPARATIVE_REVIEW_SIGNALS = ("比较", "对比", "差异", "不同国家", "各
 FACTUAL_LOOKUP_SIGNALS = ("是什么", "怎么界定", "定义", "概念", "何为", "什么意思")
 CASE_EXTRACTION_SIGNALS = ("案例", "例子", "项目", "实践", "经验")
 TOPIC_SUMMARY_SIGNALS = ("趋势", "动向", "脉络", "进展", "发展", "综述", "研究", "有哪些")
+PRIMARY_THEME_GROUPS = (
+    ("城市韧性", ("城市韧性", "urban resilience", "resilience")),
+    ("灾害风险治理", ("灾害风险治理", "disaster risk governance", "disaster risk")),
+    ("灾害治理", ("灾害治理", "disaster governance", "风险治理", "灾害")),
+)
+CASE_CARRIER_TERMS = ("世界遗产地", "世界遗产", "heritage site", "遗产地")
+CASE_REQUEST_TERMS = ("案例", "例子", "实践", "遗产地", "world heritage site", "case", "example")
+RISK_SCENE_OPTIONS = {
+    "A": {
+        "label": "洪水 / 海平面上升",
+        "terms": ("洪水", "海平面上升", "flood", "sea level rise", "coastal risk", "lagoon", "water"),
+        "follow_up": (
+            "1. 泻湖 / 港口城市与海平面上升",
+            "2. 洪水防御、排水系统与城市遗产",
+            "3. 风暴潮、海岸侵蚀与沿海风险",
+        ),
+    },
+    "B": {
+        "label": "火灾 / 林火",
+        "terms": ("火灾", "林火", "fire", "wildfire", "combustion", "emergency protection"),
+        "follow_up": (
+            "1. 历史城区火灾与应急疏散",
+            "2. 林火对文化景观 / 木构遗产的影响",
+            "3. 火后恢复与长期风险管理",
+        ),
+    },
+    "C": {
+        "label": "战争 / 突发灾害",
+        "terms": ("战争", "突发灾害", "conflict", "war", "emergency", "post-disaster protection"),
+        "follow_up": (
+            "1. 战争冲突中的遗产地应急保护",
+            "2. 震后 / 灾后抢救与恢复",
+            "3. 危机时期的治理协调机制",
+        ),
+    },
+    "D": {
+        "label": "城市更新与长期风险治理",
+        "terms": ("城市更新与长期风险治理", "urban renewal", "long-term risk", "governance", "planning", "adaptation"),
+        "follow_up": (
+            "1. 城市更新与遗产地长期韧性",
+            "2. 规划管控与风险治理工具",
+            "3. 适应性治理与长期管理机制",
+        ),
+    },
+}
+RISK_SCENE_MARKER_PREFIX = "风险场景"
+RISK_SCENE_DETAIL_OPTIONS = {
+    "A": {
+        "1": {
+            "label": "泻湖 / 港口城市与海平面上升",
+            "terms": ("lagoon", "port city", "sea level rise", "coastal flooding", "tidal water"),
+            "follow_up": (
+                "a. 你更想看泻湖城市本体的水位风险，还是港口防洪设施？",
+                "b. 你更偏向威尼斯一类滨水历史城市，还是更广义的沿海港口遗产地？",
+            ),
+        },
+        "2": {
+            "label": "洪水防御、排水系统与城市遗产",
+            "terms": ("flood defense", "drainage", "water management", "historic urban fabric"),
+            "follow_up": (
+                "a. 你更想看防洪工程本身，还是历史城区排水系统的适应性改造？",
+                "b. 你更偏向城市基础设施治理，还是遗产本体保护与排水冲突？",
+            ),
+        },
+        "3": {
+            "label": "风暴潮、海岸侵蚀与沿海风险",
+            "terms": ("storm surge", "coastal erosion", "shoreline risk", "coastal adaptation"),
+            "follow_up": (
+                "a. 你更想看风暴潮冲击，还是海岸侵蚀对遗产边界的长期影响？",
+                "b. 你更偏向沿海适应策略，还是岸线风险监测与管理？",
+            ),
+        },
+    },
+    "B": {
+        "1": {
+            "label": "历史城区火灾与应急疏散",
+            "terms": ("historic district fire", "urban evacuation", "fire emergency", "historic city"),
+            "follow_up": (
+                "a. 你更想看应急疏散体系，还是火灾后恢复流程？",
+                "b. 你更偏向城市街区层面，还是单体建筑层面？",
+            ),
+        },
+        "2": {
+            "label": "林火对文化景观 / 木构遗产的影响",
+            "terms": ("wildfire", "cultural landscape", "timber heritage", "forest fire"),
+            "follow_up": (
+                "a. 你更关注文化景观整体，还是木构遗产防火？",
+                "b. 你更想看火前防范，还是火后恢复？",
+            ),
+        },
+        "3": {
+            "label": "火后恢复与长期风险管理",
+            "terms": ("post-fire recovery", "long-term fire risk", "risk management", "recovery"),
+            "follow_up": (
+                "a. 你更想看恢复机制，还是长期风险治理工具？",
+                "b. 你更偏向单个遗产地恢复，还是区域治理经验？",
+            ),
+        },
+    },
+    "C": {
+        "1": {
+            "label": "战争冲突中的遗产地应急保护",
+            "terms": ("conflict", "war", "emergency protection", "heritage protection"),
+            "follow_up": (
+                "a. 你更想看冲突期间的抢救措施，还是国际协调机制？",
+                "b. 你更偏向城市遗产，还是考古遗址 / 文化景观？",
+            ),
+        },
+        "2": {
+            "label": "震后 / 灾后抢救与恢复",
+            "terms": ("post-disaster recovery", "earthquake", "emergency salvage", "recovery"),
+            "follow_up": (
+                "a. 你更想看震后抢救，还是灾后长期恢复？",
+                "b. 你更偏向保护技术，还是治理协调？",
+            ),
+        },
+        "3": {
+            "label": "危机时期的治理协调机制",
+            "terms": ("crisis governance", "coordination mechanism", "emergency governance", "risk coordination"),
+            "follow_up": (
+                "a. 你更想看中央-地方协调，还是国际组织协作？",
+                "b. 你更偏向制度机制，还是具体应急操作？",
+            ),
+        },
+    },
+    "D": {
+        "1": {
+            "label": "城市更新与遗产地长期韧性",
+            "terms": ("urban renewal", "heritage resilience", "long-term resilience", "historic urban area"),
+            "follow_up": (
+                "a. 你更偏向城市更新政策，还是遗产区适应性改造？",
+                "b. 你更想看长期韧性指标，还是规划工具？",
+            ),
+        },
+        "2": {
+            "label": "规划管控与风险治理工具",
+            "terms": ("planning control", "risk governance tool", "planning", "management tool"),
+            "follow_up": (
+                "a. 你更想看规划审批工具，还是风险治理评估工具？",
+                "b. 你更偏向管理规划，还是缓冲区 / 空间管控？",
+            ),
+        },
+        "3": {
+            "label": "适应性治理与长期管理机制",
+            "terms": ("adaptive governance", "long-term management", "adaptation", "governance"),
+            "follow_up": (
+                "a. 你更想看适应性治理框架，还是日常管理机制？",
+                "b. 你更偏向机构协作，还是社区参与？",
+            ),
+        },
+    },
+}
+RISK_SCENE_DETAIL_MARKER_PREFIX = "风险子场景"
+THEME_LED_PRIORITY_GROUPS = (
+    ("城市韧性", ("城市韧性", "韧性", "urban resilience", "resilience")),
+    ("灾害风险", ("灾害", "防灾", "灾害风险", "risk", "风险", "风险管理")),
+    ("应急治理", ("应急", "emergency", "治理", "governance", "灾害治理", "风险治理")),
+    ("恢复脆弱性", ("恢复", "recovery", "脆弱性", "vulnerability")),
+)
+THEME_LED_HEADING_PATTERNS = (
+    ("城市韧性与风险治理", ("城市韧性", "韧性", "风险治理", "灾害风险治理", "风险管理", "风险")),
+    ("灾害应对与应急保护", ("灾害", "防灾", "应急", "应急保护", "灾害治理")),
+    ("脆弱性与恢复机制", ("脆弱性", "恢复", "recovery", "vulnerability")),
+)
+UNESCO_DATA_HUB_RECORDS_URL = "https://data.unesco.org/api/explore/v2.1/catalog/datasets/whc001/records"
+UNESCO_CORE_FILTER_TERMS = ("resilience", "disaster", "risk", "emergency", "climate", "hazard")
+UNESCO_EXACT_RELEVANCE_PATTERNS = {
+    "resilience": re.compile(r"\bresilience\b", re.IGNORECASE),
+    "adaptation": re.compile(r"\badaptation\b", re.IGNORECASE),
+    "recovery": re.compile(r"\brecovery\b", re.IGNORECASE),
+    "disaster": re.compile(r"\bdisaster(s)?\b", re.IGNORECASE),
+    "risk": re.compile(r"\brisk(s)?\b", re.IGNORECASE),
+    "emergency": re.compile(r"\bemergency\b", re.IGNORECASE),
+    "climate": re.compile(r"\bclimate(\s+change)?\b", re.IGNORECASE),
+    "hazard": re.compile(r"\bhazard(s)?\b", re.IGNORECASE),
+    "flood": re.compile(r"\bflood(ing|s)?\b", re.IGNORECASE),
+    "fire": re.compile(r"\b(fire|wildfire|wildfires|forest fire|forest fires)\b", re.IGNORECASE),
+    "governance": re.compile(r"\bgovernance\b", re.IGNORECASE),
+}
+UNESCO_THREAT_SIGNALS = ("disaster", "risk", "emergency", "climate", "hazard", "flood", "fire")
+UNESCO_RESPONSE_SIGNALS = ("resilience", "adaptation", "recovery", "governance")
+UNESCO_STRONG_EVENT_PATTERNS = (
+    re.compile(r"\bdestroy(ed|ion)?\b", re.IGNORECASE),
+    re.compile(r"\bthreat(ened|s)?\b", re.IGNORECASE),
+    re.compile(r"\bconflict\b", re.IGNORECASE),
+    re.compile(r"\bwar\b", re.IGNORECASE),
+    re.compile(r"\bflood(ing|s)?\b", re.IGNORECASE),
+    re.compile(r"\b(fire|wildfire|wildfires|forest fire|forest fires)\b", re.IGNORECASE),
+    re.compile(r"\bsea[- ]level\b", re.IGNORECASE),
+    re.compile(r"\bclimate change\b", re.IGNORECASE),
+)
+UNESCO_WEAK_CONTEXT_PATTERNS = (
+    "climatic conditions",
+    "adaptability and tolerance",
+    "animal migrations",
+    "hunting strategy",
+    "ecological patterns",
+)
+UNESCO_THEME_EXPANSIONS = {
+    "城市韧性": ("resilience", "adaptation", "recovery"),
+    "灾害风险治理": ("disaster", "risk", "emergency", "hazard", "climate", "flood", "fire"),
+    "灾害治理": ("disaster", "risk", "emergency", "hazard", "climate", "flood", "fire"),
+}
+UNESCO_THEME_ALIGNMENT = {
+    "城市韧性": {"resilience", "adaptation", "recovery", "climate", "risk"},
+    "灾害风险治理": {"disaster", "risk", "emergency", "hazard", "flood", "fire", "governance"},
+    "灾害治理": {"disaster", "risk", "emergency", "hazard", "flood", "fire", "governance"},
+}
 THEORY_ROUTE_TERMS = (
     "participatory governance",
     "people-centred approach",
@@ -291,6 +503,13 @@ PRACTICE_TYPE_TERMS = {
     "forum_display": ("forum", "conference", "论坛", "会议"),
 }
 ORGANIZATION_MARKERS = ("ICCROM", "ICOMOS", "UNESCO", "WHIPIC", "IUCN")
+STRICT_SOURCE_MODE = True
+SOURCE_TYPE_KB = "KB"
+SOURCE_TYPE_UNESCO_API = "UNESCO_API"
+KB_CHANNEL_NAME = "国际遗产观察"
+UNESCO_API_IDENTIFIER = "whc001"
+ALLOWED_SOURCE_TYPES = (SOURCE_TYPE_KB, SOURCE_TYPE_UNESCO_API)
+LOGGER = logging.getLogger(__name__)
 
 
 def _contains_keyword(text: str, keyword: str) -> bool:
@@ -301,6 +520,111 @@ def _contains_keyword(text: str, keyword: str) -> bool:
 
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(_contains_keyword(text, keyword) for keyword in keywords)
+
+
+def normalize_clarification_option(value: str) -> str | None:
+    normalized = value.strip().upper().rstrip("。.、)")
+    if normalized in RISK_SCENE_OPTIONS:
+        return normalized
+    return None
+
+
+def normalize_follow_up_option(value: str) -> str | None:
+    normalized = value.strip().rstrip("。.、)")
+    if normalized in {"1", "2", "3"}:
+        return normalized
+    return None
+
+
+def inject_risk_scene_option(base_question: str, option: str) -> str:
+    option_data = RISK_SCENE_OPTIONS[option]
+    scene_terms = " / ".join(option_data["terms"])
+    return f"{base_question}\n[{RISK_SCENE_MARKER_PREFIX}{option}] {option_data['label']}：{scene_terms}"
+
+
+def inject_risk_scene_detail_option(base_question: str, parent_option: str, detail_option: str) -> str:
+    detail_data = RISK_SCENE_DETAIL_OPTIONS[parent_option][detail_option]
+    detail_terms = " / ".join(detail_data["terms"])
+    return (
+        f"{base_question}\n"
+        f"[{RISK_SCENE_DETAIL_MARKER_PREFIX}{parent_option}-{detail_option}] "
+        f"{detail_data['label']}：{detail_terms}"
+    )
+
+
+def _extract_selected_risk_scene_option(question: str) -> str | None:
+    marker = re.search(rf"\[{RISK_SCENE_MARKER_PREFIX}([A-D])\]", question)
+    if marker:
+        return marker.group(1)
+    return None
+
+
+def _extract_selected_risk_scene_detail(question: str) -> tuple[str | None, str | None]:
+    marker = re.search(rf"\[{RISK_SCENE_DETAIL_MARKER_PREFIX}([A-D])-([1-3])\]", question)
+    if marker:
+        return marker.group(1), marker.group(2)
+    return None, None
+
+
+def _extract_risk_scene_terms(question: str, selected_option: str | None) -> list[str]:
+    if selected_option:
+        return list(RISK_SCENE_OPTIONS[selected_option]["terms"])
+    collected = []
+    for option_data in RISK_SCENE_OPTIONS.values():
+        if any(_contains_keyword(question, term) for term in option_data["terms"]):
+            collected.extend(option_data["terms"])
+    return list(dict.fromkeys(collected))
+
+
+def _extract_risk_scene_detail_terms(
+    question: str,
+    selected_parent_option: str | None,
+    selected_detail_option: str | None,
+) -> list[str]:
+    if (
+        selected_parent_option
+        and selected_detail_option
+        and selected_parent_option in RISK_SCENE_DETAIL_OPTIONS
+        and selected_detail_option in RISK_SCENE_DETAIL_OPTIONS[selected_parent_option]
+    ):
+        return list(RISK_SCENE_DETAIL_OPTIONS[selected_parent_option][selected_detail_option]["terms"])
+    collected = []
+    for detail_group in RISK_SCENE_DETAIL_OPTIONS.values():
+        for detail_data in detail_group.values():
+            if any(_contains_keyword(question, term) for term in detail_data["terms"]):
+                collected.extend(detail_data["terms"])
+    return list(dict.fromkeys(collected))
+
+
+def detect_document_source_type(document: dict) -> str | None:
+    if document.get("channel") == KB_CHANNEL_NAME:
+        return SOURCE_TYPE_KB
+
+    source_identifiers = (
+        document.get("source_system"),
+        document.get("source_api"),
+        document.get("dataset_id"),
+    )
+    if UNESCO_API_IDENTIFIER in source_identifiers:
+        return SOURCE_TYPE_UNESCO_API
+    return None
+
+
+def is_document_from_allowed_source(
+    document: dict,
+    allowed_source_types: tuple[str, ...] = ALLOWED_SOURCE_TYPES,
+) -> bool:
+    source_type = detect_document_source_type(document)
+    return source_type in allowed_source_types
+
+
+def _filter_documents_by_source_whitelist(
+    documents: list[dict],
+    strict_source_mode: bool,
+) -> list[dict]:
+    if not strict_source_mode:
+        return documents
+    return [document for document in documents if is_document_from_allowed_source(document)]
 
 
 def classify_query_type(question: str) -> str:
@@ -443,6 +767,14 @@ def _analyze_question(question: str, documents: list[dict], reference_date: date
     domain_hits = [phrase for phrase in DOMAIN_PHRASES if phrase in question]
     phrases = _tokenize(question)
     thematic_terms = _extract_thematic_terms(question, category_hits, years)
+    selected_risk_scene_option = _extract_selected_risk_scene_option(question)
+    selected_risk_scene_detail_parent, selected_risk_scene_detail_option = _extract_selected_risk_scene_detail(question)
+    risk_scene_terms = _extract_risk_scene_terms(question, selected_risk_scene_option)
+    risk_scene_detail_terms = _extract_risk_scene_detail_terms(
+        question,
+        selected_risk_scene_detail_parent,
+        selected_risk_scene_detail_option,
+    )
     relative_start, relative_end = _parse_relative_year_window(question, reference_date)
     query_type = classify_query_type(question)
     return {
@@ -453,6 +785,13 @@ def _analyze_question(question: str, documents: list[dict], reference_date: date
         "thematic_terms": thematic_terms,
         "query_type": query_type,
         "task_type": _detect_task_type(question),
+        "primary_theme_terms": _extract_primary_theme_terms(question),
+        "case_carrier_terms": _extract_case_carrier_terms(question),
+        "selected_risk_scene_option": selected_risk_scene_option,
+        "risk_scene_terms": risk_scene_terms,
+        "selected_risk_scene_detail_parent": selected_risk_scene_detail_parent,
+        "selected_risk_scene_detail_option": selected_risk_scene_detail_option,
+        "risk_scene_detail_terms": risk_scene_detail_terms,
         "wants_recent": "最近" in question or "动态" in question,
         "relative_start": relative_start,
         "relative_end": relative_end,
@@ -460,7 +799,23 @@ def _analyze_question(question: str, documents: list[dict], reference_date: date
     }
 
 
+def _extract_primary_theme_terms(question: str) -> list[str]:
+    terms = []
+    for normalized_label, keywords in PRIMARY_THEME_GROUPS:
+        if _contains_any(question, keywords):
+            terms.append(normalized_label)
+    return list(dict.fromkeys(terms))
+
+
+def _extract_case_carrier_terms(question: str) -> list[str]:
+    return [term for term in CASE_CARRIER_TERMS if _contains_keyword(question, term)]
+
+
 def _primary_focus(question: str, analysis: dict) -> str:
+    if analysis.get("primary_theme_terms"):
+        if len(analysis["primary_theme_terms"]) >= 2:
+            return "与".join(analysis["primary_theme_terms"][:2])
+        return analysis["primary_theme_terms"][0]
     if analysis["digital_focus"] and analysis["task_type"] == "trend":
         return "遗产数字化发展"
     if analysis["task_type"] == "concept":
@@ -495,6 +850,8 @@ def _build_conclusion(question: str, analysis: dict, matches: list[dict]) -> str
     focus = _primary_focus(question, analysis)
     if not prefix:
         prefix = "当前问题"
+    if _is_theme_led_case_query(analysis):
+        return f"{prefix}的重点不在一般性的世界遗产动态，而在于围绕“{focus}”梳理出可支撑案例分析的主题材料。"
     if analysis["task_type"] == "concept":
         return f"{prefix}涉及的{focus}定义主要可从{len(matches)}条库内线索中把握。"
     if analysis["task_type"] == "trend":
@@ -558,6 +915,11 @@ def _scope_phrase(analysis: dict) -> str:
 def _build_question_understanding(question: str, analysis: dict) -> str:
     focus = _primary_focus(question, analysis)
     scope = _scope_phrase(analysis)
+    has_case_carrier = bool(analysis.get("case_carrier_terms"))
+    if analysis.get("primary_theme_terms") and has_case_carrier:
+        if scope:
+            return f"你问的是一个主题型检索问题，重点是想了解{scope}语境下“{focus}”的相关信息，并把世界遗产地作为案例载体来寻找可用材料。"
+        return f"你问的是一个主题型检索问题，重点是想了解“{focus}”的相关信息，并把世界遗产地作为案例载体来寻找可用材料。"
     if analysis["task_type"] == "concept":
         if scope:
             return f"你问的是一个概念界定问题，重点不是单条新闻，而是想弄清楚{scope}语境下“{focus}”在库内通常如何被解释。"
@@ -617,6 +979,17 @@ def _build_library_conclusion_text(question: str, analysis: dict, matches: list[
     evidence_mix = _format_evidence_mix(matches)
     category_mix = _format_category_mix(matches)
     theme_labels = "、".join(theme["label"] for theme in themes[:3])
+    if _is_theme_led_case_query(analysis):
+        details = []
+        if evidence_mix:
+            details.append(f"当前命中的材料类型主要来自{evidence_mix}")
+        if category_mix:
+            details.append(f"并覆盖{category_mix}等方向")
+        if theme_labels:
+            details.append(f"可进一步归纳为{theme_labels}三组证据")
+        if details:
+            return f"基于库内文章归纳，{conclusion} {'，'.join(details)}。"
+        return f"基于库内文章归纳，{conclusion}"
 
     if analysis["task_type"] == "concept":
         extra = "当前命中的材料更像是从不同类型文本拼出概念边界，而不是给出单一定义。"
@@ -689,6 +1062,8 @@ def _build_practice_points(matches: list[dict]) -> list[str]:
 def _build_single_judgment(question: str, analysis: dict, matches: list[dict], themes: list[dict]) -> str:
     focus = _primary_focus(question, analysis)
     theme_labels = "、".join(theme["label"] for theme in themes[:3])
+    if _is_theme_led_case_query(analysis):
+        return f"基于库内文章归纳，当前更能支撑“{focus}”这一主题的分组梳理，世界遗产地在这里更适合作为案例承载体而不是主题本身。"
     if analysis["task_type"] == "concept":
         return f"基于库内文章归纳，当前对“{focus}”的解释，主要围绕{theme_labels or '若干代表性线索'}展开。"
     if analysis["task_type"] == "trend":
@@ -698,7 +1073,354 @@ def _build_single_judgment(question: str, analysis: dict, matches: list[dict], t
     return f"基于库内文章归纳，当前库内可见的动作，主要落在{theme_labels or '若干代表性线索'}几类方向上。"
 
 
-def build_structured_answer(question: str, analysis: dict, matches: list[dict]) -> str:
+def _is_theme_led_case_query(analysis: dict) -> bool:
+    return bool(analysis.get("primary_theme_terms")) and bool(analysis.get("case_carrier_terms"))
+
+
+def _theme_led_group_score(document: dict, keywords: tuple[str, ...]) -> int:
+    title = document.get("title", "")
+    haystack = _document_haystack(document)
+    score = 0
+    for keyword in keywords:
+        if _contains_keyword(title, keyword):
+            score += 10
+        elif _contains_keyword(haystack, keyword):
+            score += 5
+    return score
+
+
+def _requires_heritage_case_examples(analysis: dict) -> bool:
+    return _is_theme_led_case_query(analysis) and analysis["task_type"] == "case"
+
+
+def _theme_led_heritage_case_score(document: dict, analysis: dict) -> int:
+    if not _is_theme_led_case_query(analysis):
+        return 0
+    haystack = _document_haystack(document)
+    theme_score = 0
+    for _label, keywords in THEME_LED_PRIORITY_GROUPS:
+        theme_score += _theme_led_group_score(document, keywords)
+    heritage_score = 0
+    for term in analysis.get("case_carrier_terms", []):
+        if _contains_keyword(document.get("title", ""), term):
+            heritage_score += 8
+        elif _contains_keyword(haystack, term):
+            heritage_score += 4
+    if theme_score <= 0 or heritage_score <= 0:
+        return 0
+    return theme_score + heritage_score
+
+
+def _supports_theme_led_heritage_case(document: dict, analysis: dict) -> bool:
+    return _theme_led_heritage_case_score(document, analysis) > 0
+
+
+def _build_case_clarification_question(question: str, analysis: dict) -> str:
+    focus = _primary_focus(question, analysis)
+    return (
+        f"当前库内未检索到与“{focus}”直接对应的世界遗产地案例。\n"
+        "请问你更希望缩小到哪一类风险场景？\n"
+        "A. 洪水 / 海平面上升\n"
+        "B. 火灾 / 林火\n"
+        "C. 战争 / 突发灾害\n"
+        "D. 城市更新与长期风险治理"
+    )
+
+
+def _should_query_unesco_cases(analysis: dict) -> bool:
+    return analysis["task_type"] == "case" and bool(analysis.get("case_carrier_terms"))
+
+
+def _expand_unesco_query_terms(analysis: dict) -> list[str]:
+    terms = []
+    for theme in analysis.get("primary_theme_terms", []):
+        terms.extend(UNESCO_THEME_EXPANSIONS.get(theme, ()))
+    terms.extend(analysis.get("risk_scene_terms", []))
+    terms.extend(analysis.get("risk_scene_detail_terms", []))
+    if not terms:
+        terms.extend(UNESCO_CORE_FILTER_TERMS)
+    return list(dict.fromkeys(terms))
+
+
+def _normalize_unesco_country(record: dict) -> str:
+    states = record.get("states_names")
+    if isinstance(states, list):
+        return "、".join(str(state) for state in states if state)
+    return str(states or "未知")
+
+
+def _normalize_unesco_url(record: dict) -> str | None:
+    site_id = record.get("id_no")
+    if site_id:
+        return f"https://whc.unesco.org/en/list/{site_id}"
+    return None
+
+
+def _unesco_relevance_text(record: dict) -> str:
+    return " ".join(
+        str(record.get(field, ""))
+        for field in ("description_en", "short_description_en", "justification_en")
+        if record.get(field)
+    )
+
+
+def _detect_unesco_signal_hits(relevance_text: str) -> list[str]:
+    hits = []
+    for label, pattern in UNESCO_EXACT_RELEVANCE_PATTERNS.items():
+        if pattern.search(relevance_text):
+            hits.append(label)
+    return hits
+
+
+def _normalize_unesco_danger_flag(record: dict) -> bool:
+    danger_value = record.get("danger")
+    if isinstance(danger_value, bool):
+        return danger_value
+    if isinstance(danger_value, str):
+        return danger_value.strip().lower() in {"true", "1", "y", "yes"}
+    return bool(danger_value)
+
+
+def _has_unesco_strong_event_context(relevance_text: str) -> bool:
+    return any(pattern.search(relevance_text) for pattern in UNESCO_STRONG_EVENT_PATTERNS)
+
+
+def _has_unesco_weak_context(relevance_text: str) -> bool:
+    lowered = relevance_text.lower()
+    return any(pattern in lowered for pattern in UNESCO_WEAK_CONTEXT_PATTERNS)
+
+
+def _is_strong_unesco_case_match(record: dict, hits: list[str], relevance_text: str) -> bool:
+    threat_hits = [signal for signal in UNESCO_THREAT_SIGNALS if signal in hits]
+    response_hits = [signal for signal in UNESCO_RESPONSE_SIGNALS if signal in hits]
+    danger_flag = _normalize_unesco_danger_flag(record)
+    if not threat_hits:
+        return False
+    if danger_flag and _has_unesco_strong_event_context(relevance_text):
+        return True
+    if len(threat_hits) >= 2 and response_hits and not _has_unesco_weak_context(relevance_text):
+        return True
+    if {"climate", "flood"}.issubset(set(threat_hits)) and response_hits:
+        return True
+    if {"climate", "risk"}.issubset(set(threat_hits)) and response_hits and not _has_unesco_weak_context(relevance_text):
+        return True
+    return False
+
+
+def _matched_unesco_query_themes(analysis: dict | None, hits: list[str]) -> list[str]:
+    if not analysis:
+        return []
+    matched_themes = []
+    hit_set = set(hits)
+    for theme in analysis.get("primary_theme_terms", []):
+        if hit_set.intersection(UNESCO_THEME_ALIGNMENT.get(theme, set())):
+            matched_themes.append(theme)
+    return matched_themes
+
+
+def _score_unesco_case_relevance(record: dict, analysis: dict | None, hits: list[str], relevance_text: str) -> tuple[int, str]:
+    if not _is_strong_unesco_case_match(record, hits, relevance_text):
+        return 0, ""
+
+    danger_flag = _normalize_unesco_danger_flag(record)
+    threat_hits = [signal for signal in UNESCO_THREAT_SIGNALS if signal in hits]
+    response_hits = [signal for signal in UNESCO_RESPONSE_SIGNALS if signal in hits]
+    matched_themes = _matched_unesco_query_themes(analysis, hits)
+
+    if analysis and analysis.get("primary_theme_terms") and not matched_themes:
+        return 0, ""
+
+    score = len(threat_hits) * 6 + len(response_hits) * 5 + len(matched_themes) * 12
+    if danger_flag:
+        score += 10
+    if _has_unesco_strong_event_context(relevance_text):
+        score += 8
+    if not _has_unesco_weak_context(relevance_text):
+        score += 4
+
+    reason_parts = []
+    if matched_themes:
+        reason_parts.append(f"命中主题：{'、'.join(matched_themes)}")
+    if threat_hits:
+        reason_parts.append(f"风险信号：{' / '.join(threat_hits[:3])}")
+    if response_hits:
+        reason_parts.append(f"响应信号：{' / '.join(response_hits[:2])}")
+    if danger_flag:
+        reason_parts.append("处于 UNESCO danger 语境")
+    return score, "；".join(reason_parts)
+
+
+def _filter_unesco_world_heritage_sites(records: list[dict], analysis: dict | None = None) -> list[dict]:
+    filtered = []
+    for record in records:
+        relevance_text = _unesco_relevance_text(record)
+        if not relevance_text:
+            continue
+        matched_terms = _detect_unesco_signal_hits(relevance_text)
+        if not matched_terms:
+            continue
+        if not any(term in matched_terms for term in UNESCO_CORE_FILTER_TERMS):
+            continue
+        relevance_score, relevance_reason = _score_unesco_case_relevance(record, analysis, matched_terms, relevance_text)
+        if relevance_score <= 0:
+            continue
+        filtered.append(
+            {
+                "site_name": record.get("name_zh") or record.get("name_en") or "未命名遗产地",
+                "country": _normalize_unesco_country(record),
+                "inscription_year": record.get("date_inscribed"),
+                "unesco_url": _normalize_unesco_url(record),
+                "matched_terms": matched_terms,
+                "danger_flag": _normalize_unesco_danger_flag(record),
+                "relevance_score": relevance_score,
+                "relevance_reason": relevance_reason,
+            }
+        )
+    filtered.sort(key=lambda case: (case["relevance_score"], case["inscription_year"] or ""), reverse=True)
+    return filtered
+
+
+def searchWorldHeritageSites(query_terms: list[str], analysis: dict | None = None) -> list[dict]:
+    deduped_records: dict[str, dict] = {}
+    headers = {"User-Agent": "Mozilla/5.0"}
+    for term in query_terms:
+        params = urlencode({"limit": 20, "q": term})
+        url = f"{UNESCO_DATA_HUB_RECORDS_URL}?{params}"
+        try:
+            with urlopen(Request(url, headers=headers), timeout=20) as response:
+                payload = json.load(response)
+        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
+            continue
+        for record in payload.get("results", []):
+            record_key = str(record.get("uuid") or record.get("id_no") or record.get("name_en") or record.get("name_zh"))
+            if record_key:
+                deduped_records[record_key] = record
+    return _filter_unesco_world_heritage_sites(list(deduped_records.values()), analysis=analysis)
+
+
+def _build_unesco_case_relevance(case: dict, analysis: dict) -> str:
+    focus = _primary_focus("", analysis)
+    if case.get("relevance_reason"):
+        return f"其 UNESCO 官方简介与“{focus}”的关联主要体现在：{case['relevance_reason']}。"
+    matched_terms = " / ".join(case.get("matched_terms", [])[:2]) or "相关风险信号"
+    return f"其 UNESCO 官方简介中出现了与“{focus}”相关的 {matched_terms} 信号，可作为该主题下的世界遗产地案例。"
+
+
+def _build_unesco_case_section(cases: list[dict], analysis: dict) -> str:
+    lines = ["相关世界遗产地案例（UNESCO）："]
+    for case in cases[:4]:
+        title = case["site_name"]
+        if case.get("unesco_url"):
+            title = f"[{title}]({case['unesco_url']})"
+        inscription_year = case.get("inscription_year") or "未知"
+        lines.append(
+            f"- 名称：{title}；国家：{case['country']}；列入年份：{inscription_year}；相关性：{_build_unesco_case_relevance(case, analysis)}"
+        )
+    return "\n".join(lines)
+
+
+def _build_unesco_case_clarification_question() -> str:
+    return (
+        "当前在UNESCO数据中未检索到与该主题直接匹配的世界遗产地案例。\n"
+        "请问你希望聚焦哪类风险场景？\n"
+        "A. 洪水 / 海平面上升\n"
+        "B. 火灾 / 林火\n"
+        "C. 战争 / 突发灾害\n"
+        "D. 城市更新与长期风险治理"
+    )
+
+
+def _build_unesco_case_follow_up_clarification(analysis: dict) -> str:
+    option = analysis.get("selected_risk_scene_option")
+    if not option or option not in RISK_SCENE_OPTIONS:
+        return _build_unesco_case_clarification_question()
+    option_data = RISK_SCENE_OPTIONS[option]
+    lines = [
+        f"当前在UNESCO数据中仍未检索到与“{option_data['label']}”直接匹配的稳定世界遗产地案例。",
+        "如果你愿意，我们可以继续缩小到更具体的一层：",
+    ]
+    lines.extend(option_data["follow_up"])
+    return "\n".join(lines)
+
+
+def _build_unesco_case_detail_follow_up_clarification(analysis: dict) -> str:
+    parent_option = analysis.get("selected_risk_scene_detail_parent")
+    detail_option = analysis.get("selected_risk_scene_detail_option")
+    if (
+        not parent_option
+        or not detail_option
+        or parent_option not in RISK_SCENE_DETAIL_OPTIONS
+        or detail_option not in RISK_SCENE_DETAIL_OPTIONS[parent_option]
+    ):
+        return _build_unesco_case_follow_up_clarification(analysis)
+    detail_data = RISK_SCENE_DETAIL_OPTIONS[parent_option][detail_option]
+    lines = [
+        f"当前在UNESCO数据中仍未检索到与“{detail_data['label']}”直接匹配的稳定世界遗产地案例。",
+        "如果你愿意，我们可以再把范围缩窄一点：",
+    ]
+    lines.extend(detail_data["follow_up"])
+    return "\n".join(lines)
+
+
+def _theme_led_evidence_sections(documents: list[dict]) -> list[dict]:
+    section_map = {label: [] for label, _keywords in THEME_LED_HEADING_PATTERNS}
+    for document in documents:
+        haystack = _document_haystack(document)
+        best_label = None
+        best_score = 0
+        for label, keywords in THEME_LED_HEADING_PATTERNS:
+            score = sum(1 for keyword in keywords if _contains_keyword(haystack, keyword))
+            if score > best_score:
+                best_score = score
+                best_label = label
+        if best_label and best_score > 0:
+            section_map[best_label].append(document)
+    sections = []
+    for label, _keywords in THEME_LED_HEADING_PATTERNS:
+        if section_map[label]:
+            sections.append({"label": label, "documents": section_map[label]})
+    if sections:
+        return sections
+    return [{"label": "核心证据", "documents": documents[:3]}]
+
+
+def _theme_led_section_summary(label: str, documents: list[dict]) -> str:
+    titles = "、".join(f"《{document['title']}》" for document in documents[:2])
+    if label == "城市韧性与风险治理":
+        return f"从{titles}看，命中的材料更集中在城市韧性、灾害风险与治理框架的耦合，而不是一般性的遗产动态。"
+    if label == "灾害应对与应急保护":
+        return f"从{titles}看，命中的材料把灾害应对、应急保护与遗产地管理机制放在同一条实践链路里。"
+    if label == "脆弱性与恢复机制":
+        return f"从{titles}看，命中的材料更强调风险暴露、脆弱性评估与灾后恢复之间的连续关系。"
+    return f"从{titles}看，当前命中的材料可作为这一主题下的直接证据。"
+
+
+def _build_theme_led_answer(question: str, analysis: dict, matches: list[dict], extended_matches: list[dict]) -> str:
+    sections = _theme_led_evidence_sections(extended_matches or matches)
+    lines = [
+        "基于库内文章归纳：",
+        "",
+        "问题理解：",
+        _build_question_understanding(question, analysis),
+        "",
+        "库内结论：",
+        _build_library_conclusion_text(question, analysis, extended_matches or matches, sections),
+        "",
+    ]
+    for section in sections:
+        lines.extend([f"{section['label']}：", f"- {_theme_led_section_summary(section['label'], section['documents'])}", ""])
+    lines.extend(["证据文章："])
+    for document in matches:
+        lines.append(
+            f"- [{infer_evidence_type(document)}] {_format_title_link(document)} | {document['published_at']} | {document['category']}"
+        )
+    lines.extend(["", "证据边界：", _build_evidence_boundary(analysis, extended_matches or matches)])
+    return "\n".join(lines)
+
+
+def build_structured_answer(question: str, analysis: dict, matches: list[dict], extended_matches: list[dict] | None = None) -> str:
+    if _is_theme_led_case_query(analysis):
+        return _build_theme_led_answer(question, analysis, matches, extended_matches or matches)
     themes = _collect_theme_buckets(matches)
     lines = [
         "基于库内文章归纳：",
@@ -740,6 +1462,7 @@ def _score(document: dict, analysis: dict) -> int:
     thematic_score = 0
     evidence_type = infer_evidence_type(document)
     published_at = _parse_published_at(document.get("published_at", ""))
+    is_theme_led = _is_theme_led_case_query(analysis)
     if analysis["category_hits"]:
         if document.get("category") in analysis["category_hits"]:
             score += 12
@@ -774,10 +1497,10 @@ def _score(document: dict, analysis: dict) -> int:
 
     if analysis["domain_hits"]:
         if any(domain in haystack for domain in analysis["domain_hits"]):
-            score += 10
+            score += 3 if is_theme_led else 10
         elif analysis["digital_focus"] and _has_broader_heritage_digital_signal(document):
             score += 2
-        else:
+        elif not is_theme_led:
             score -= 14
 
     if analysis["digital_focus"]:
@@ -786,11 +1509,43 @@ def _score(document: dict, analysis: dict) -> int:
         else:
             score -= 18
 
-    for term in analysis["thematic_terms"]:
-        if term in document.get("title", ""):
-            thematic_score += max(2, len(term))
-        elif term in haystack:
-            thematic_score += max(1, len(term) - 1)
+    if is_theme_led:
+        for label, keywords in THEME_LED_PRIORITY_GROUPS:
+            group_score = _theme_led_group_score(document, keywords)
+            if label in analysis.get("primary_theme_terms", []):
+                thematic_score += group_score * 2
+            else:
+                thematic_score += group_score
+        for term in analysis.get("risk_scene_terms", []):
+            if _contains_keyword(document.get("title", ""), term):
+                thematic_score += 8
+            elif _contains_keyword(haystack, term):
+                thematic_score += 4
+        for term in analysis.get("risk_scene_detail_terms", []):
+            if _contains_keyword(document.get("title", ""), term):
+                thematic_score += 10
+            elif _contains_keyword(haystack, term):
+                thematic_score += 5
+        if thematic_score == 0:
+            thematic_score -= 20
+        case_constraint_score = 0
+        for term in analysis.get("case_carrier_terms", []):
+            if _contains_keyword(document.get("title", ""), term):
+                case_constraint_score += 4
+            elif _contains_keyword(haystack, term):
+                case_constraint_score += 2
+        thematic_score += case_constraint_score
+        heritage_case_score = _theme_led_heritage_case_score(document, analysis)
+        if heritage_case_score > 0:
+            thematic_score += heritage_case_score
+        if case_constraint_score > 0 and thematic_score <= case_constraint_score:
+            thematic_score -= 10
+    else:
+        for term in analysis["thematic_terms"]:
+            if term in document.get("title", ""):
+                thematic_score += max(2, len(term))
+            elif term in haystack:
+                thematic_score += max(1, len(term) - 1)
 
     score += thematic_score
     if analysis["thematic_terms"] and thematic_score == 0:
@@ -817,13 +1572,13 @@ def _score(document: dict, analysis: dict) -> int:
             score -= 2
     elif task_type == "case":
         if evidence_type == "一般动态":
-            score += 8
+            score += 2 if is_theme_led else 8
         elif evidence_type == "政策动态":
-            score += 8
+            score += 2 if is_theme_led else 8
         elif evidence_type == "报告资源":
-            score += 4
+            score += 12 if is_theme_led else 4
         elif evidence_type == "会议新闻":
-            score -= 6
+            score -= 2 if is_theme_led else -6
     else:
         if evidence_type == "政策动态":
             score += 10
@@ -948,32 +1703,42 @@ def _supports_practice_document(document: dict) -> bool:
     return _contains_any(_document_haystack(document), PRACTICE_ROUTE_TERMS)
 
 
-def _select_matches_from_ranked(ranked: list[tuple[dict, int]], analysis: dict, limit: int) -> list[dict]:
+def _select_relevant_matches_from_ranked(ranked: list[tuple[dict, int]], analysis: dict) -> list[dict]:
+    is_theme_led = _is_theme_led_case_query(analysis)
     positive_matches = [document for document, score in ranked if score > 0]
+    candidate_matches = [document for document, _score in ranked] if is_theme_led else positive_matches
     if analysis["digital_focus"]:
-        digital_filtered = [document for document in positive_matches if _has_digital_signal(document)]
+        digital_filtered = [document for document in candidate_matches if _has_digital_signal(document)]
         if digital_filtered:
-            positive_matches = digital_filtered
+            candidate_matches = digital_filtered
     if analysis["relative_start"] and analysis["relative_end"]:
         start = datetime.strptime(analysis["relative_start"], "%Y-%m-%d").date()
         end = datetime.strptime(analysis["relative_end"], "%Y-%m-%d").date()
         relative_filtered = []
-        for document in positive_matches:
+        for document in candidate_matches:
             published_at = _parse_published_at(document.get("published_at", ""))
             if published_at and start <= published_at <= end:
                 relative_filtered.append(document)
         if relative_filtered:
-            positive_matches = relative_filtered
+            candidate_matches = relative_filtered
     if analysis["years"]:
         year_filtered = [
             document
-            for document in positive_matches
+            for document in candidate_matches
             if any(document.get("published_at", "").startswith(year) for year in analysis["years"])
         ]
-        matches = year_filtered[:limit] if year_filtered else positive_matches[:limit]
-    else:
-        matches = positive_matches[:limit]
-    return _dedupe_documents(matches)
+        candidate_matches = year_filtered if year_filtered else candidate_matches
+    return _dedupe_documents(candidate_matches)
+
+
+def _select_matches_from_ranked(ranked: list[tuple[dict, int]], analysis: dict, limit: int) -> tuple[list[dict], list[dict]]:
+    extended_matches = _select_relevant_matches_from_ranked(ranked, analysis)
+    if _requires_heritage_case_examples(analysis):
+        case_matches = [document for document in extended_matches if _supports_theme_led_heritage_case(document, analysis)]
+        case_keys = {_document_key(document) for document in case_matches}
+        ordered_matches = case_matches + [document for document in extended_matches if _document_key(document) not in case_keys]
+        return ordered_matches[:limit], extended_matches
+    return extended_matches[:limit], extended_matches
 
 
 def _rank_documents_from_loaded_documents(
@@ -981,7 +1746,7 @@ def _rank_documents_from_loaded_documents(
     documents: list[dict],
     limit: int = 5,
     reference_date: date | None = None,
-) -> tuple[list[dict], dict]:
+) -> tuple[list[dict], list[dict], dict]:
     if reference_date is None:
         reference_date = date.today()
     analysis = _analyze_question(question, documents, reference_date)
@@ -990,7 +1755,8 @@ def _rank_documents_from_loaded_documents(
         key=lambda item: (item[1], item[0].get("published_at", "")),
         reverse=True,
     )
-    return _select_matches_from_ranked(ranked, analysis, limit), analysis
+    matches, extended_matches = _select_matches_from_ranked(ranked, analysis, limit)
+    return matches, extended_matches, analysis
 
 
 def _build_route_question(question: str, route_terms: tuple[str, ...]) -> str:
@@ -1030,16 +1796,16 @@ def _rank_documents_for_route(
             elif _contains_keyword(haystack, term):
                 score += 2
         ranked.append((document, score))
-    matches = _select_matches_from_ranked(ranked, analysis, max(limit * 2, 8))
+    matches, extended_matches = _select_matches_from_ranked(ranked, analysis, max(limit * 2, 8))
     if route_kind == "theory":
-        route_filtered = [document for document in matches if _supports_strong_theory_document(document)]
+        route_filtered = [document for document in extended_matches if _supports_strong_theory_document(document)]
         return _dedupe_documents(route_filtered)[:limit]
     else:
-        route_filtered = [document for document in matches if _supports_practice_document(document)]
+        route_filtered = [document for document in extended_matches if _supports_practice_document(document)]
         if route_filtered:
             route_keys = {_document_key(document) for document in route_filtered}
-            matches = route_filtered + [document for document in matches if _document_key(document) not in route_keys]
-        return _limit_homogeneous_practice_documents(matches)[:limit]
+            extended_matches = route_filtered + [document for document in extended_matches if _document_key(document) not in route_keys]
+        return _limit_homogeneous_practice_documents(extended_matches)[:limit]
 
 
 def _select_answer_context(
@@ -1047,9 +1813,13 @@ def _select_answer_context(
     library_path: Path,
     limit: int = 5,
     reference_date: date | None = None,
+    strict_source_mode: bool = STRICT_SOURCE_MODE,
 ) -> dict:
-    documents = _load_documents(library_path)
-    matches, analysis = _rank_documents_from_loaded_documents(
+    documents = _filter_documents_by_source_whitelist(
+        _load_documents(library_path),
+        strict_source_mode=strict_source_mode,
+    )
+    matches, extended_matches, analysis = _rank_documents_from_loaded_documents(
         question,
         documents,
         limit=limit,
@@ -1059,6 +1829,7 @@ def _select_answer_context(
         return {
             "analysis": analysis,
             "matches": matches,
+            "extended_matches": extended_matches,
             "theory_matches": [],
             "practice_matches": [],
         }
@@ -1086,6 +1857,7 @@ def _select_answer_context(
     return {
         "analysis": analysis,
         "matches": merged_matches,
+        "extended_matches": _dedupe_documents(extended_matches + theory_matches + practice_matches),
         "theory_matches": theory_matches,
         "practice_matches": practice_matches,
     }
@@ -1300,16 +2072,45 @@ def build_answer_bundle(
     library_path: Path,
     limit: int = 5,
     reference_date: date | None = None,
+    strict_source_mode: bool = STRICT_SOURCE_MODE,
 ) -> dict:
     context = _select_answer_context(
         question,
         library_path,
         limit=limit,
         reference_date=reference_date,
+        strict_source_mode=strict_source_mode,
     )
     matches = context["matches"]
     analysis = context["analysis"]
+    unesco_cases: list[dict] = []
+    unesco_follow_up: str | None = None
+    if _should_query_unesco_cases(analysis):
+        unesco_query_terms = _expand_unesco_query_terms(analysis)
+        LOGGER.info("UNESCO_QUERY_TERMS=%s", ",".join(unesco_query_terms))
+        unesco_cases = searchWorldHeritageSites(unesco_query_terms, analysis=analysis)
+        LOGGER.info("UNESCO_RESULTS_COUNT=%s", len(unesco_cases))
+        if not unesco_cases:
+            if analysis.get("selected_risk_scene_detail_option"):
+                unesco_follow_up = _build_unesco_case_detail_follow_up_clarification(analysis)
+            elif analysis.get("selected_risk_scene_option"):
+                unesco_follow_up = _build_unesco_case_follow_up_clarification(analysis)
+            else:
+                return {
+                    "answer": _build_unesco_case_clarification_question(),
+                    "sources": [],
+                }
     if not matches:
+        if unesco_cases:
+            return {
+                "answer": "当前知识库未提供相关分析内容。\n\n" + _build_unesco_case_section(unesco_cases, analysis),
+                "sources": [],
+            }
+        if unesco_follow_up:
+            return {
+                "answer": "当前知识库未提供相关分析内容。\n\n" + unesco_follow_up,
+                "sources": [],
+            }
         return {
             "answer": "当前库内没有足够材料支持该回答。",
             "sources": [],
@@ -1322,7 +2123,11 @@ def build_answer_bundle(
             context["practice_matches"],
         )
     else:
-        answer = build_structured_answer(question, analysis, matches)
+        answer = build_structured_answer(question, analysis, matches, context.get("extended_matches"))
+    if unesco_cases:
+        answer = answer + "\n\n" + _build_unesco_case_section(unesco_cases, analysis)
+    elif unesco_follow_up:
+        answer = answer + "\n\n" + unesco_follow_up
     return {
         "answer": answer,
         "sources": [
@@ -1343,9 +2148,19 @@ def _rank_documents(
     library_path: Path,
     limit: int = 5,
     reference_date: date | None = None,
+    strict_source_mode: bool = STRICT_SOURCE_MODE,
 ) -> tuple[list[dict], dict]:
-    documents = _load_documents(library_path)
-    return _rank_documents_from_loaded_documents(question, documents, limit=limit, reference_date=reference_date)
+    documents = _filter_documents_by_source_whitelist(
+        _load_documents(library_path),
+        strict_source_mode=strict_source_mode,
+    )
+    matches, _extended_matches, analysis = _rank_documents_from_loaded_documents(
+        question,
+        documents,
+        limit=limit,
+        reference_date=reference_date,
+    )
+    return matches, analysis
 
 
 def answer_question(
@@ -1353,12 +2168,14 @@ def answer_question(
     library_path: Path,
     limit: int = 5,
     reference_date: date | None = None,
+    strict_source_mode: bool = STRICT_SOURCE_MODE,
 ) -> str:
     return build_answer_bundle(
         question,
         library_path,
         limit=limit,
         reference_date=reference_date,
+        strict_source_mode=strict_source_mode,
     )["answer"]
 
 
@@ -1367,10 +2184,12 @@ def collect_source_cards(
     library_path: Path,
     limit: int = 5,
     reference_date: date | None = None,
+    strict_source_mode: bool = STRICT_SOURCE_MODE,
 ) -> list[dict]:
     return build_answer_bundle(
         question,
         library_path,
         limit=limit,
         reference_date=reference_date,
+        strict_source_mode=strict_source_mode,
     )["sources"]

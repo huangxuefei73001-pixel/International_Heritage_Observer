@@ -4,6 +4,7 @@ import json
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -538,6 +539,57 @@ def test_answer_from_library_returns_structured_blocks():
     assert result["sources"][0]["evidence_type"] == "一般动态"
 
 
+def test_answer_from_library_filters_non_whitelisted_sources_in_strict_mode(tmp_path):
+    library_path = Path("tests/tmp/chat_strict_source_articles.jsonl")
+    library_path.parent.mkdir(parents=True, exist_ok=True)
+    library_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "article_id": "1",
+                        "title": "韩国召开第48届世界遗产大会联席工作会",
+                        "published_at": "2026-03-20 11:25",
+                        "channel": "国际遗产观察",
+                        "category": "韩国",
+                        "source_url": "https://mp.weixin.qq.com/s/allowed",
+                        "local_source_path": "/tmp/a.docx",
+                        "content_text": "韩国日前召开第48届世界遗产大会跨部门工作会。",
+                        "content_html_excerpt": "<p>x</p>",
+                        "parse_status": "ok",
+                        "tags_auto": ["韩国", "世界遗产大会"],
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "article_id": "2",
+                        "title": "外部数据库：韩国世界遗产专题快报",
+                        "published_at": "2026-03-21 08:00",
+                        "channel": "外部资料库",
+                        "category": "韩国",
+                        "source_url": "https://example.com/foreign",
+                        "local_source_path": "/tmp/b.docx",
+                        "content_text": "这是一条不在白名单内的外部内容。",
+                        "content_html_excerpt": "<p>y</p>",
+                        "parse_status": "ok",
+                        "tags_auto": ["韩国", "世界遗产"],
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = answer_from_library("最近韩国有什么世界遗产动态？", library_path, strict_source_mode=True)
+
+    assert len(result["sources"]) == 1
+    assert result["sources"][0]["title"] == "韩国召开第48届世界遗产大会联席工作会"
+    assert "外部数据库：韩国世界遗产专题快报" not in result["answer"]
+
+
 def test_chat_ask_endpoint_returns_structured_answer():
     library_path = Path("tests/tmp/chat_endpoint_articles.jsonl")
     library_path.parent.mkdir(parents=True, exist_ok=True)
@@ -757,6 +809,155 @@ def test_chat_ask_reuses_existing_conversation(tmp_path):
     assert messages[0].role == "user"
     assert messages[1].role == "assistant"
     assert conversation.updated_at > datetime(2024, 1, 1, 0, 0, 0)
+
+
+@patch("app.routers.chat.answer_from_library")
+def test_chat_ask_injects_risk_scene_option_into_effective_question(mock_answer_from_library, tmp_path):
+    library_path = tmp_path / "chat_library.jsonl"
+    library_path.write_text(
+        json.dumps(
+            {
+                "article_id": "1",
+                "title": "世界遗产城市韧性与灾害风险治理框架发布",
+                "published_at": "2025-03-20 11:25",
+                "channel": "国际遗产观察",
+                "category": "报告资源",
+                "source_url": "https://mp.weixin.qq.com/s/example",
+                "local_source_path": "/tmp/a.docx",
+                "content_text": "城市韧性与灾害风险治理。",
+                "content_html_excerpt": "<p>x</p>",
+                "parse_status": "ok",
+                "tags_auto": ["城市韧性", "灾害风险治理"],
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    mock_answer_from_library.return_value = {"answer": "ok", "sources": []}
+    client, engine, session_factory = _build_chat_test_client(library_path)
+
+    try:
+        with session_factory() as db:
+            user = User(email="user@example.com", role="user")
+            db.add(user)
+            db.flush()
+            conversation = Conversation(user_id=user.id, title="Existing")
+            db.add(conversation)
+            db.flush()
+            db.add_all(
+                [
+                    Message(
+                        conversation_id=conversation.id,
+                        role="user",
+                        content="我需要找城市韧性与灾害治理的信息，包括世界遗产地案例",
+                    ),
+                    Message(
+                        conversation_id=conversation.id,
+                        role="assistant",
+                        content=(
+                            "当前在UNESCO数据中未检索到与该主题直接匹配的世界遗产地案例。\n"
+                            "请问你希望聚焦哪类风险场景？\n"
+                            "A. 洪水 / 海平面上升\nB. 火灾 / 林火\nC. 战争 / 突发灾害\nD. 城市更新与长期风险治理"
+                        ),
+                    ),
+                ]
+            )
+            db.commit()
+            conversation_id = conversation.id
+
+        response = client.post(
+            "/chat/ask",
+            headers={"X-Debug-User": "user@example.com"},
+            json={"question": "A", "conversation_id": conversation_id},
+        )
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+    assert response.status_code == 200
+    injected_question = mock_answer_from_library.call_args.args[0]
+    assert "我需要找城市韧性与灾害治理的信息，包括世界遗产地案例" in injected_question
+    assert "风险场景A" in injected_question
+    assert "洪水" in injected_question
+    assert "sea level rise" in injected_question
+
+
+@patch("app.routers.chat.answer_from_library")
+def test_chat_ask_injects_second_layer_risk_scene_option_into_effective_question(mock_answer_from_library, tmp_path):
+    library_path = tmp_path / "chat_library.jsonl"
+    library_path.write_text(
+        json.dumps(
+            {
+                "article_id": "1",
+                "title": "威尼斯泻湖与海平面上升风险研究",
+                "published_at": "2025-03-20 11:25",
+                "channel": "国际遗产观察",
+                "category": "报告资源",
+                "source_url": "https://mp.weixin.qq.com/s/example",
+                "local_source_path": "/tmp/a.docx",
+                "content_text": "lagoon, port city, sea level rise.",
+                "content_html_excerpt": "<p>x</p>",
+                "parse_status": "ok",
+                "tags_auto": ["lagoon", "sea level rise"],
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    mock_answer_from_library.return_value = {"answer": "ok", "sources": []}
+    client, engine, session_factory = _build_chat_test_client(library_path)
+
+    try:
+        with session_factory() as db:
+            user = User(email="user@example.com", role="user")
+            db.add(user)
+            db.flush()
+            conversation = Conversation(user_id=user.id, title="Existing")
+            db.add(conversation)
+            db.flush()
+            db.add_all(
+                [
+                    Message(
+                        conversation_id=conversation.id,
+                        role="user",
+                        content=(
+                            "我需要找城市韧性与灾害治理的信息，包括世界遗产地案例\n"
+                            "[风险场景A] 洪水 / 海平面上升：洪水 / 海平面上升 / flood / sea level rise / coastal risk / lagoon / water"
+                        ),
+                    ),
+                    Message(
+                        conversation_id=conversation.id,
+                        role="assistant",
+                        content=(
+                            "当前在UNESCO数据中仍未检索到与“洪水 / 海平面上升”直接匹配的稳定世界遗产地案例。\n"
+                            "如果你愿意，我们可以继续缩小到更具体的一层：\n"
+                            "1. 泻湖 / 港口城市与海平面上升\n"
+                            "2. 洪水防御、排水系统与城市遗产\n"
+                            "3. 风暴潮、海岸侵蚀与沿海风险"
+                        ),
+                    ),
+                ]
+            )
+            db.commit()
+            conversation_id = conversation.id
+
+        response = client.post(
+            "/chat/ask",
+            headers={"X-Debug-User": "user@example.com"},
+            json={"question": "1", "conversation_id": conversation_id},
+        )
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+    assert response.status_code == 200
+    injected_question = mock_answer_from_library.call_args.args[0]
+    assert "风险场景A" in injected_question
+    assert "风险子场景A-1" in injected_question
+    assert "lagoon" in injected_question
+    assert "port city" in injected_question
 
 
 def test_chat_ask_rejects_other_users_conversation(tmp_path):
