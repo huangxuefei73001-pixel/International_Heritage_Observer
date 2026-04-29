@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import re
+import subprocess
+from difflib import SequenceMatcher
 from datetime import date, datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 
@@ -163,6 +165,81 @@ PRIMARY_THEME_GROUPS = (
 )
 CASE_CARRIER_TERMS = ("世界遗产地", "世界遗产", "heritage site", "遗产地")
 CASE_REQUEST_TERMS = ("案例", "例子", "实践", "遗产地", "world heritage site", "case", "example")
+REGISTRY_FIELD_TERMS = ("列入年份", "年份", "国家", "类型", "页面", "网址", "链接", "名录", "官网")
+REGISTRY_TYPE_TERMS = {
+    "cultural": ("文化遗产", "cultural"),
+    "natural": ("自然遗产", "natural"),
+    "mixed": ("混合遗产", "mixed"),
+}
+REGISTRY_EXAMPLE_TERMS = ("例子", "案例", "有哪些", "列表", "名录", "示例")
+REGISTRY_COUNT_TERMS = ("多少处", "多少个", "一共有多少", "共有多少", "有多少处", "有多少个")
+REGISTRY_COUNTRY_ALIASES = {
+    "中国": "China",
+    "意大利": "Italy",
+    "法国": "France",
+    "西班牙": "Spain",
+    "德国": "Germany",
+    "英国": "United Kingdom",
+    "日本": "Japan",
+    "韩国": "Republic of Korea",
+    "美国": "United States of America",
+    "加拿大": "Canada",
+    "澳大利亚": "Australia",
+    "印度": "India",
+    "巴西": "Brazil",
+    "墨西哥": "Mexico",
+    "埃及": "Egypt",
+    "希腊": "Greece",
+    "俄罗斯": "Russian Federation",
+    "土耳其": "Türkiye",
+}
+REGISTRY_SITE_PATTERNS = (
+    re.compile(r"(?P<name>[\u4e00-\u9fffA-Za-z·\-\s]{2,40})的(?:列入年份|年份|类型|国家|页面|网址|链接)"),
+    re.compile(r"(?P<name>[\u4e00-\u9fffA-Za-z·\-\s]{2,40})是什么时候列入"),
+    re.compile(r"(?P<name>[\u4e00-\u9fffA-Za-z·\-\s]{2,40})是(?:什么类型|哪一年列入)"),
+)
+REGISTRY_COLLECTION_PAGE_SIZE = 100
+REGISTRY_COLLECTION_MAX_RECORDS = 400
+REGISTRY_COUNTRY_PATTERNS = (
+    re.compile(r"(?P<country>[\u4e00-\u9fffA-Za-z·\-\s]{2,30})有哪些世界遗产"),
+    re.compile(r"(?P<country>[\u4e00-\u9fffA-Za-z·\-\s]{2,30})的世界遗产(?:地)?(?:有哪些|列表|名录|例子|案例)"),
+    re.compile(r"(?P<country>[\u4e00-\u9fffA-Za-z·\-\s]{2,30})一共有多少(?:处|个)世界遗产(?:地)?"),
+    re.compile(r"(?P<country>[\u4e00-\u9fffA-Za-z·\-\s]{2,30})有多少(?:处|个)世界遗产(?:地)?"),
+)
+REGISTRY_NOISE_TERMS = (
+    "我需要找",
+    "我想找",
+    "请问",
+    "帮我",
+    "一下",
+    "哪些",
+    "有哪些",
+    "世界遗产地",
+    "世界遗产",
+    "遗产地",
+    "案例",
+    "例子",
+    "名录",
+    "信息",
+    "官网",
+    "页面",
+    "网址",
+    "链接",
+    "列入年份",
+    "年份",
+    "类型",
+    "国家",
+)
+REGISTRY_SELECT_FIELDS = ",".join(
+    (
+        "id_no",
+        "name_en",
+        "name_zh",
+        "states_names",
+        "date_inscribed",
+        "category",
+    )
+)
 RISK_SCENE_OPTIONS = {
     "A": {
         "label": "洪水 / 海平面上升",
@@ -777,7 +854,7 @@ def _analyze_question(question: str, documents: list[dict], reference_date: date
     )
     relative_start, relative_end = _parse_relative_year_window(question, reference_date)
     query_type = classify_query_type(question)
-    return {
+    analysis = {
         "years": years,
         "category_hits": category_hits,
         "domain_hits": domain_hits,
@@ -797,6 +874,8 @@ def _analyze_question(question: str, documents: list[dict], reference_date: date
         "relative_end": relative_end,
         "digital_focus": any(signal in question for signal in DIGITAL_HIGH_SIGNAL),
     }
+    analysis["unesco_registry_query"] = _parse_unesco_registry_query(question, analysis)
+    return analysis
 
 
 def _extract_primary_theme_terms(question: str) -> list[str]:
@@ -809,6 +888,124 @@ def _extract_primary_theme_terms(question: str) -> list[str]:
 
 def _extract_case_carrier_terms(question: str) -> list[str]:
     return [term for term in CASE_CARRIER_TERMS if _contains_keyword(question, term)]
+
+
+def _clean_registry_value(value: str) -> str:
+    cleaned = value.strip(" ：:，,。.？?；;（）()[]【】")
+    cleaned = re.sub(r"20\d{2}年", " ", cleaned)
+    for noise in REGISTRY_NOISE_TERMS:
+        cleaned = cleaned.replace(noise, " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def _contains_chinese(value: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff]", value))
+
+
+def _normalize_registry_country_query(country: str | None) -> str | None:
+    if not country:
+        return None
+    return REGISTRY_COUNTRY_ALIASES.get(country, country)
+
+
+def _registry_escape_like(value: str) -> str:
+    return value.replace('"', '\\"')
+
+
+def _registry_site_name_variants(site_name: str | None) -> list[str]:
+    if not site_name:
+        return []
+    variants = [site_name]
+    for pattern in ("及其", "和", "与", "、"):
+        if pattern in site_name:
+            head = site_name.split(pattern, 1)[0].strip()
+            if len(head) >= 2:
+                variants.append(head)
+    return list(dict.fromkeys(variants))
+
+
+def _normalize_registry_site_token(value: str) -> str:
+    return re.sub(r"[^a-z0-9\u4e00-\u9fff]", "", value.lower())
+
+
+def _registry_name_similarity(left: str, right: str) -> float:
+    if not left or not right:
+        return 0.0
+    left_norm = _normalize_registry_site_token(left)
+    right_norm = _normalize_registry_site_token(right)
+    if not left_norm or not right_norm:
+        return 0.0
+    if left_norm in right_norm or right_norm in left_norm:
+        return 1.0
+    return SequenceMatcher(None, left_norm, right_norm).ratio()
+
+
+def _extract_registry_type(question: str) -> str | None:
+    for normalized, keywords in REGISTRY_TYPE_TERMS.items():
+        if _contains_any(question, keywords):
+            return normalized
+    return None
+
+
+def _extract_registry_country(question: str) -> str | None:
+    for pattern in REGISTRY_COUNTRY_PATTERNS:
+        match = pattern.search(question)
+        if match:
+            country = _clean_registry_value(match.group("country"))
+            if country:
+                return country
+    return None
+
+
+def _extract_registry_site_name(question: str) -> str | None:
+    for pattern in REGISTRY_SITE_PATTERNS:
+        match = pattern.search(question)
+        if match:
+            name = _clean_registry_value(match.group("name"))
+            if name:
+                return name
+    if any(term in question for term in REGISTRY_FIELD_TERMS) and "的" in question:
+        candidate = _clean_registry_value(question.split("的", 1)[0])
+        if 2 <= len(candidate) <= 40:
+            return candidate
+    return None
+
+
+def _parse_unesco_registry_query(question: str, analysis: dict) -> dict:
+    site_name = _extract_registry_site_name(question)
+    country = _extract_registry_country(question)
+    heritage_type = _extract_registry_type(question)
+    year = analysis["years"][0] if analysis.get("years") else None
+    asks_fields = {
+        "year": any(term in question for term in ("列入年份", "年份", "哪一年", "什么时候列入")),
+        "country": "国家" in question,
+        "type": "类型" in question,
+        "url": any(term in question for term in ("页面", "网址", "链接", "官网")),
+        "count": any(term in question for term in REGISTRY_COUNT_TERMS),
+    }
+    general_examples = (
+        bool(analysis.get("case_carrier_terms"))
+        and not analysis.get("primary_theme_terms")
+        and any(term in question for term in REGISTRY_EXAMPLE_TERMS)
+    )
+    if site_name:
+        mode = "entity_lookup"
+    elif country or heritage_type or general_examples:
+        mode = "collection_query"
+    elif year and (any(asks_fields.values()) or country or heritage_type):
+        mode = "collection_query"
+    else:
+        mode = None
+    return {
+        "mode": mode,
+        "site_name": site_name,
+        "country": country,
+        "heritage_type": heritage_type,
+        "inscription_year": year,
+        "asks_fields": asks_fields,
+        "general_examples": general_examples,
+    }
 
 
 def _primary_focus(question: str, analysis: dict) -> str:
@@ -1127,8 +1324,23 @@ def _build_case_clarification_question(question: str, analysis: dict) -> str:
     )
 
 
+def _select_unesco_mode(question: str, analysis: dict) -> str | None:
+    registry_query = analysis.get("unesco_registry_query", {})
+    explicit_registry_lookup = bool(
+        registry_query.get("site_name")
+        or any(registry_query.get("asks_fields", {}).values())
+    )
+    if explicit_registry_lookup and registry_query.get("mode"):
+        return "registry_query"
+    if bool(analysis.get("primary_theme_terms")) and bool(analysis.get("case_carrier_terms")):
+        return "thematic_case"
+    if registry_query.get("mode"):
+        return "registry_query"
+    return None
+
+
 def _should_query_unesco_cases(analysis: dict) -> bool:
-    return analysis["task_type"] == "case" and bool(analysis.get("case_carrier_terms"))
+    return _select_unesco_mode("", analysis) == "thematic_case"
 
 
 def _expand_unesco_query_terms(analysis: dict) -> list[str]:
@@ -1154,6 +1366,168 @@ def _normalize_unesco_url(record: dict) -> str | None:
     if site_id:
         return f"https://whc.unesco.org/en/list/{site_id}"
     return None
+
+
+def _normalize_unesco_category(record: dict) -> str:
+    raw_value = record.get("category") or record.get("category_txt") or record.get("category_short") or ""
+    lowered = str(raw_value).lower()
+    if "mixed" in lowered or "混合" in str(raw_value):
+        return "mixed"
+    if "natural" in lowered or "自然" in str(raw_value):
+        return "natural"
+    if "cultural" in lowered or "文化" in str(raw_value):
+        return "cultural"
+    return str(raw_value or "未知")
+
+
+def _fetch_unesco_records(params: dict[str, str | int]) -> list[dict]:
+    query_params = {"limit": 20, "select": REGISTRY_SELECT_FIELDS}
+    query_params.update(params)
+    url = f"{UNESCO_DATA_HUB_RECORDS_URL}?{urlencode(query_params, quote_via=quote)}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        with urlopen(Request(url, headers=headers), timeout=20) as response:
+            payload = json.load(response)
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
+        try:
+            result = subprocess.run(
+                ["curl", "-L", "--max-time", "20", "-A", "Mozilla/5.0", url],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            payload = json.loads(result.stdout)
+        except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError):
+            return []
+    return payload.get("results", [])
+
+
+def _fetch_unesco_records_paginated(params: dict[str, str | int], page_size: int = REGISTRY_COLLECTION_PAGE_SIZE) -> list[dict]:
+    records: list[dict] = []
+    offset = 0
+    while len(records) < REGISTRY_COLLECTION_MAX_RECORDS:
+        page_params = dict(params)
+        page_params["limit"] = page_size
+        page_params["offset"] = offset
+        page_results = _fetch_unesco_records(page_params)
+        if not page_results:
+            break
+        records.extend(page_results)
+        if len(page_results) < page_size:
+            break
+        offset += page_size
+    return records
+
+
+def _matches_registry_site_name(record: dict, site_name: str | None) -> bool:
+    if not site_name:
+        return True
+    candidate_names = [str(record.get(field, "")) for field in ("name_zh", "name_en") if record.get(field)]
+    for variant in _registry_site_name_variants(site_name):
+        for candidate in candidate_names:
+            if _registry_name_similarity(variant, candidate) >= 0.72:
+                return True
+    return False
+
+
+def _matches_registry_country(record: dict, country: str | None) -> bool:
+    if not country:
+        return True
+    normalized_country = _normalize_registry_country_query(country)
+    states = record.get("states_names")
+    if isinstance(states, list):
+        state_text = " ".join(str(state) for state in states)
+    else:
+        state_text = str(states or "")
+    return normalized_country.lower() in state_text.lower()
+
+
+def _matches_registry_type(record: dict, heritage_type: str | None) -> bool:
+    if not heritage_type:
+        return True
+    return _normalize_unesco_category(record) == heritage_type
+
+
+def _matches_registry_year(record: dict, year: str | None) -> bool:
+    if not year:
+        return True
+    return str(record.get("date_inscribed") or "") == str(year)
+
+
+def _registry_record_matches(record: dict, registry_query: dict) -> bool:
+    return (
+        _matches_registry_site_name(record, registry_query.get("site_name"))
+        and _matches_registry_country(record, registry_query.get("country"))
+        and _matches_registry_type(record, registry_query.get("heritage_type"))
+        and _matches_registry_year(record, registry_query.get("inscription_year"))
+    )
+
+
+def _build_registry_fetch_params(registry_query: dict) -> list[dict[str, str | int]]:
+    requests: list[dict[str, str | int]] = []
+    filter_clauses: list[str] = []
+    country = _normalize_registry_country_query(registry_query.get("country"))
+    heritage_type = registry_query.get("heritage_type")
+    inscription_year = registry_query.get("inscription_year")
+    site_name = registry_query.get("site_name")
+
+    if country:
+        filter_clauses.append(f'states_names like "{_registry_escape_like(country)}"')
+    if heritage_type:
+        type_label = {"cultural": "Cultural", "natural": "Natural", "mixed": "Mixed"}.get(heritage_type, heritage_type)
+        filter_clauses.append(f'category = "{_registry_escape_like(type_label)}"')
+    if inscription_year:
+        filter_clauses.append(f'date_inscribed = "{inscription_year}"')
+
+    if site_name:
+        for variant in _registry_site_name_variants(site_name):
+            field = "name_zh" if _contains_chinese(variant) else "name_en"
+            clauses = [f'{field} like "%{_registry_escape_like(variant)}%"']
+            clauses.extend(filter_clauses)
+            requests.append({"where": " and ".join(clauses)})
+        requests.append({"q": site_name})
+
+    if filter_clauses and not site_name:
+        requests.append({"where": " and ".join(filter_clauses)})
+        if country:
+            requests.append({"q": country})
+        if heritage_type:
+            requests.append({"q": heritage_type})
+
+    if registry_query.get("general_examples") and not requests:
+        requests.append({"limit": 12})
+    if not requests:
+        requests.append({})
+    return requests
+
+
+def _normalize_unesco_registry_record(record: dict) -> dict:
+    return {
+        "site_name": record.get("name_zh") or record.get("name_en") or "未命名遗产地",
+        "country": _normalize_unesco_country(record),
+        "inscription_year": record.get("date_inscribed"),
+        "heritage_type": _normalize_unesco_category(record),
+        "unesco_url": _normalize_unesco_url(record),
+        "description": record.get("short_description_en") or record.get("description_en") or record.get("justification_en") or "",
+    }
+
+
+def searchWorldHeritageRegistry(registry_query: dict) -> list[dict]:
+    deduped_records: dict[str, dict] = {}
+    is_collection_mode = registry_query.get("mode") == "collection_query"
+    for params in _build_registry_fetch_params(registry_query):
+        fetcher = _fetch_unesco_records_paginated if is_collection_mode else _fetch_unesco_records
+        for record in fetcher(params):
+            record_key = str(record.get("uuid") or record.get("id_no") or record.get("name_en") or record.get("name_zh"))
+            if record_key:
+                deduped_records[record_key] = record
+    matched = [
+        _normalize_unesco_registry_record(record)
+        for record in deduped_records.values()
+        if _registry_record_matches(record, registry_query)
+    ]
+    matched.sort(key=lambda case: (str(case.get("inscription_year") or ""), case["site_name"]), reverse=False)
+    return matched
 
 
 def _unesco_relevance_text(record: dict) -> str:
@@ -1282,16 +1656,8 @@ def _filter_unesco_world_heritage_sites(records: list[dict], analysis: dict | No
 
 def searchWorldHeritageSites(query_terms: list[str], analysis: dict | None = None) -> list[dict]:
     deduped_records: dict[str, dict] = {}
-    headers = {"User-Agent": "Mozilla/5.0"}
     for term in query_terms:
-        params = urlencode({"limit": 20, "q": term})
-        url = f"{UNESCO_DATA_HUB_RECORDS_URL}?{params}"
-        try:
-            with urlopen(Request(url, headers=headers), timeout=20) as response:
-                payload = json.load(response)
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
-            continue
-        for record in payload.get("results", []):
+        for record in _fetch_unesco_records({"q": term}):
             record_key = str(record.get("uuid") or record.get("id_no") or record.get("name_en") or record.get("name_zh"))
             if record_key:
                 deduped_records[record_key] = record
@@ -1359,6 +1725,65 @@ def _build_unesco_case_detail_follow_up_clarification(analysis: dict) -> str:
         "如果你愿意，我们可以再把范围缩窄一点：",
     ]
     lines.extend(detail_data["follow_up"])
+    return "\n".join(lines)
+
+
+def _build_registry_case_line(case: dict) -> str:
+    title = case["site_name"]
+    if case.get("unesco_url"):
+        title = f"[{title}]({case['unesco_url']})"
+    inscription_year = case.get("inscription_year") or "未知"
+    heritage_type = case.get("heritage_type") or "未知"
+    return (
+        f"- 名称：{title}；国家：{case['country']}；列入年份：{inscription_year}；"
+        f"类型：{heritage_type}；UNESCO 页面：{case.get('unesco_url') or '未提供'}"
+    )
+
+
+def _build_unesco_registry_answer(question: str, analysis: dict, registry_query: dict, cases: list[dict]) -> str:
+    site_name = registry_query.get("site_name")
+    country = registry_query.get("country")
+    heritage_type = registry_query.get("heritage_type")
+    year = registry_query.get("inscription_year")
+    asks_fields = registry_query.get("asks_fields", {})
+
+    lines = ["UNESCO 世界遗产名录信息：", ""]
+    if site_name and cases:
+        case = cases[0]
+        if asks_fields.get("year"):
+            lines.append(f"- {case['site_name']}的列入年份：{case.get('inscription_year') or '未知'}")
+        elif asks_fields.get("type"):
+            lines.append(f"- {case['site_name']}的类型：{case.get('heritage_type') or '未知'}")
+        elif asks_fields.get("country"):
+            lines.append(f"- {case['site_name']}所在国家：{case['country']}")
+        elif asks_fields.get("url"):
+            lines.append(f"- {case['site_name']}的 UNESCO 页面：{case.get('unesco_url') or '未提供'}")
+        else:
+            lines.append(f"- 名称：{case['site_name']}")
+        lines.append(_build_registry_case_line(case))
+        return "\n".join(lines)
+
+    if country or heritage_type or year or registry_query.get("general_examples"):
+        descriptor_parts = []
+        if country:
+            descriptor_parts.append(country)
+        if heritage_type:
+            type_label = {"cultural": "文化遗产", "natural": "自然遗产", "mixed": "混合遗产"}.get(heritage_type, heritage_type)
+            descriptor_parts.append(type_label)
+        if year:
+            descriptor_parts.append(f"{year}年列入")
+        descriptor = "、".join(descriptor_parts) if descriptor_parts else "相关"
+        total_count = len(cases)
+        if asks_fields.get("count"):
+            lines.append(f"- {descriptor}世界遗产地数量：{total_count}处")
+        lines.append(f"- 检索范围：{descriptor}世界遗产地（共{total_count}处）")
+        for case in cases:
+            lines.append(_build_registry_case_line(case))
+        return "\n".join(lines)
+
+    lines.append(f"- 当前问题“{question.rstrip('？?')}”未触发明确的名录字段展示。")
+    for case in cases:
+        lines.append(_build_registry_case_line(case))
     return "\n".join(lines)
 
 
@@ -2083,9 +2508,22 @@ def build_answer_bundle(
     )
     matches = context["matches"]
     analysis = context["analysis"]
+    unesco_mode = _select_unesco_mode(question, analysis)
+    if unesco_mode == "registry_query":
+        registry_query = analysis.get("unesco_registry_query", {})
+        registry_cases = searchWorldHeritageRegistry(registry_query)
+        if not registry_cases:
+            return {
+                "answer": "当前在UNESCO数据中未检索到相关世界遗产名录信息。",
+                "sources": [],
+            }
+        return {
+            "answer": _build_unesco_registry_answer(question, analysis, registry_query, registry_cases),
+            "sources": [],
+        }
     unesco_cases: list[dict] = []
     unesco_follow_up: str | None = None
-    if _should_query_unesco_cases(analysis):
+    if unesco_mode == "thematic_case":
         unesco_query_terms = _expand_unesco_query_terms(analysis)
         LOGGER.info("UNESCO_QUERY_TERMS=%s", ",".join(unesco_query_terms))
         unesco_cases = searchWorldHeritageSites(unesco_query_terms, analysis=analysis)

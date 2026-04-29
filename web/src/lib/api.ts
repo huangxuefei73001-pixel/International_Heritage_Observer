@@ -34,6 +34,15 @@ export type AdminConversation = {
   updated_at: string;
 };
 
+export type AdminMessage = {
+  message_id: number;
+  conversation_id: number;
+  conversation_title: string;
+  content: string;
+  user_email: string;
+  created_at: string;
+};
+
 export type ConversationSummary = {
   conversation_id: number;
   title: string;
@@ -156,6 +165,13 @@ export function passwordLogin(
 
 export function fetchAdminConversations(debugUserEmail: string): Promise<AdminConversation[]> {
   return requestJson<AdminConversation[]>("/admin/conversations", {
+    method: "GET",
+    debugUserEmail,
+  });
+}
+
+export function fetchAdminMessages(debugUserEmail: string): Promise<AdminMessage[]> {
+  return requestJson<AdminMessage[]>("/admin/messages", {
     method: "GET",
     debugUserEmail,
   });

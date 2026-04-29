@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation";
 
 import {
   fetchAdminConversations,
-  refreshKnowledgeBase,
+  fetchAdminMessages,
   type AdminConversation,
-  type RefreshLibraryResponse,
+  type AdminMessage,
 } from "@/lib/api";
 import { getStoredSession } from "@/lib/session";
 
 import { ConversationTable } from "./conversation-table";
+import { RecentQuestionTable } from "./recent-question-table";
 import { SyncPanel } from "./sync-panel";
 
 export function AdminShell() {
@@ -19,12 +20,11 @@ export function AdminShell() {
   const [adminEmail, setAdminEmail] = useState("");
   const [isCheckingAccess, setIsCheckingAccess] = useState(true);
   const [isLoadingConversations, setIsLoadingConversations] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(true);
   const [conversations, setConversations] = useState<AdminConversation[]>([]);
+  const [messages, setMessages] = useState<AdminMessage[]>([]);
   const [tableError, setTableError] = useState("");
-  const [syncStatus, setSyncStatus] = useState("点击按钮即可手动更新知识库。");
-  const [syncError, setSyncError] = useState("");
-  const [syncSummary, setSyncSummary] = useState<RefreshLibraryResponse | null>(null);
+  const [messageError, setMessageError] = useState("");
 
   useEffect(() => {
     const session = getStoredSession();
@@ -37,6 +37,7 @@ export function AdminShell() {
     setIsCheckingAccess(false);
 
     void loadConversations(session.email);
+    void loadMessages(session.email);
   }, [router]);
 
   async function loadConversations(debugUserEmail: string) {
@@ -54,26 +55,18 @@ export function AdminShell() {
     }
   }
 
-  async function handleRefreshLibrary() {
-    if (!adminEmail) {
-      setSyncError("管理员身份未就绪，请重新登录。");
-      return;
-    }
-
-    setIsRefreshing(true);
-    setSyncError("");
-    setSyncStatus("正在同步新增文章…");
+  async function loadMessages(debugUserEmail: string) {
+    setIsLoadingMessages(true);
+    setMessageError("");
 
     try {
-      const result = await refreshKnowledgeBase(adminEmail);
-      setSyncSummary(result);
-      setSyncStatus("知识库已更新完成。");
-      await loadConversations(adminEmail);
+      const result = await fetchAdminMessages(debugUserEmail);
+      setMessages(result);
     } catch (exception) {
-      setSyncStatus("");
-      setSyncError(exception instanceof Error ? exception.message : "更新知识库失败");
+      setMessageError(exception instanceof Error ? exception.message : "加载最近提问失败");
+      setMessages([]);
     } finally {
-      setIsRefreshing(false);
+      setIsLoadingMessages(false);
     }
   }
 
@@ -98,19 +91,17 @@ export function AdminShell() {
       </header>
 
       <div className="admin-shell__grid">
+        <RecentQuestionTable
+          messages={messages}
+          isLoading={isLoadingMessages}
+          error={messageError}
+        />
         <ConversationTable
           conversations={conversations}
           isLoading={isLoadingConversations}
           error={tableError}
         />
-        <SyncPanel
-          adminEmail={adminEmail}
-          isRefreshing={isRefreshing}
-          status={syncStatus}
-          error={syncError}
-          summary={syncSummary}
-          onRefresh={handleRefreshLibrary}
-        />
+        <SyncPanel adminEmail={adminEmail} />
       </div>
     </section>
   );

@@ -4,7 +4,11 @@ import unittest
 from unittest.mock import patch
 
 from guoji_yichan_guancha.query import (
+    _analyze_question,
+    _fetch_unesco_records_paginated,
     _select_answer_context,
+    _select_unesco_mode,
+    _matches_registry_site_name,
     _filter_unesco_world_heritage_sites,
     answer_question,
     detect_document_source_type,
@@ -25,6 +29,53 @@ class QueryTest(unittest.TestCase):
         self.assertTrue(is_document_from_allowed_source(kb_document))
         self.assertTrue(is_document_from_allowed_source(unesco_document))
         self.assertFalse(is_document_from_allowed_source(foreign_document))
+
+    def test_mode_selection_prefers_registry_for_explicit_site_lookup(self) -> None:
+        question = "威尼斯及其泻湖的风险治理与列入年份是什么？"
+        analysis = _analyze_question(question, [], date(2026, 4, 23))
+        self.assertEqual(_select_unesco_mode(question, analysis), "registry_query")
+
+    def test_mode_selection_keeps_thematic_for_country_scoped_theme_case_query(self) -> None:
+        question = "意大利有哪些与灾害风险相关的世界遗产地案例？"
+        analysis = _analyze_question(question, [], date(2026, 4, 23))
+        self.assertEqual(_select_unesco_mode(question, analysis), "thematic_case")
+
+    def test_registry_site_name_matching_supports_partial_and_fuzzy_variants(self) -> None:
+        record = {"name_zh": "威尼斯及泻湖", "name_en": "Venice and its Lagoon"}
+        self.assertTrue(_matches_registry_site_name(record, "威尼斯"))
+        self.assertTrue(_matches_registry_site_name(record, "威尼斯及其泻湖"))
+        self.assertTrue(_matches_registry_site_name(record, "Venice"))
+
+    @patch("guoji_yichan_guancha.query._fetch_unesco_records")
+    def test_collection_registry_query_fetches_multiple_pages(self, mock_fetch_records) -> None:
+        first_page = [
+            {
+                "id_no": index,
+                "name_zh": f"站点{index}",
+                "name_en": f"Site {index}",
+                "states_names": ["Italy"],
+                "date_inscribed": 1980 + index,
+                "category": "Cultural",
+            }
+            for index in range(1, 101)
+        ]
+        second_page = [
+            {
+                "id_no": index,
+                "name_zh": f"站点{index}",
+                "name_en": f"Site {index}",
+                "states_names": ["Italy"],
+                "date_inscribed": 1980 + index,
+                "category": "Cultural",
+            }
+            for index in range(101, 106)
+        ]
+        mock_fetch_records.side_effect = [first_page, second_page]
+
+        records = _fetch_unesco_records_paginated({"where": 'states_names like "Italy"'})
+
+        self.assertEqual(len(records), 105)
+        self.assertEqual(mock_fetch_records.call_count, 2)
 
     def test_infer_evidence_type_distinguishes_report_book_and_meeting(self) -> None:
         report = {"title": "【报告】世界遗产影响评估研究", "category": "报告研究", "content_text": ""}
@@ -177,6 +228,187 @@ class QueryTest(unittest.TestCase):
         self.assertIn("城市韧性与灾害治理", answer)
         self.assertIn("把世界遗产地作为案例载体", answer)
         self.assertNotIn("与“世界遗产案例”直接相关的代表性做法", answer)
+
+    @patch("guoji_yichan_guancha.query.searchWorldHeritageRegistry")
+    @patch("guoji_yichan_guancha.query.searchWorldHeritageSites")
+    def test_thematic_mode_keeps_existing_unesco_case_path(self, mock_thematic_search, mock_registry_search) -> None:
+        mock_thematic_search.return_value = []
+        library_path = Path("tests/tmp/articles_thematic_mode.jsonl")
+        library_path.parent.mkdir(parents=True, exist_ok=True)
+        library_path.write_text(
+            '{"article_id":"1","title":"世界遗产城市韧性与灾害风险治理框架发布","published_at":"2025-03-10 20:30","channel":"国际遗产观察","category":"报告资源","source_url":"https://mp.weixin.qq.com/s/theme-kb","local_source_path":"/tmp/a.docx","content_text":"文章系统讨论城市韧性、灾害风险、风险治理与世界遗产城市管理框架。","content_html_excerpt":"<p>a</p>","parse_status":"ok","tags_auto":["城市韧性","灾害风险治理","世界遗产"]}\n',
+            encoding="utf-8",
+        )
+
+        answer_question("我需要找城市韧性与灾害治理的信息，包括世界遗产地案例", library_path, limit=5)
+
+        mock_thematic_search.assert_called_once()
+        mock_registry_search.assert_not_called()
+
+    @patch("guoji_yichan_guancha.query.searchWorldHeritageRegistry")
+    def test_registry_mode_answers_entity_attribute_query(self, mock_registry_search) -> None:
+        mock_registry_search.return_value = [
+            {
+                "site_name": "威尼斯及其泻湖",
+                "country": "意大利",
+                "inscription_year": 1987,
+                "heritage_type": "cultural",
+                "unesco_url": "https://whc.unesco.org/en/list/394",
+                "description": "Example description.",
+            }
+        ]
+        library_path = Path("tests/tmp/articles_registry_entity.jsonl")
+        library_path.parent.mkdir(parents=True, exist_ok=True)
+        library_path.write_text("", encoding="utf-8")
+
+        answer = answer_question("威尼斯及其泻湖的列入年份是什么？", library_path, limit=5)
+
+        mock_registry_search.assert_called_once()
+        self.assertIn("UNESCO 世界遗产名录信息：", answer)
+        self.assertIn("威尼斯及其泻湖的列入年份：1987", answer)
+        self.assertNotIn("基于库内文章归纳", answer)
+
+    @patch("guoji_yichan_guancha.query.searchWorldHeritageRegistry")
+    def test_registry_mode_answers_collection_query(self, mock_registry_search) -> None:
+        mock_registry_search.return_value = [
+            {
+                "site_name": "威尼斯及其泻湖",
+                "country": "意大利",
+                "inscription_year": 1987,
+                "heritage_type": "cultural",
+                "unesco_url": "https://whc.unesco.org/en/list/394",
+                "description": "",
+            },
+            {
+                "site_name": "罗马历史中心",
+                "country": "意大利",
+                "inscription_year": 1980,
+                "heritage_type": "cultural",
+                "unesco_url": "https://whc.unesco.org/en/list/91",
+                "description": "",
+            },
+        ]
+        library_path = Path("tests/tmp/articles_registry_collection.jsonl")
+        library_path.parent.mkdir(parents=True, exist_ok=True)
+        library_path.write_text("", encoding="utf-8")
+
+        answer = answer_question("意大利有哪些世界遗产地？", library_path, limit=5)
+
+        self.assertIn("检索范围：意大利世界遗产地", answer)
+        self.assertIn("威尼斯及其泻湖", answer)
+        self.assertIn("罗马历史中心", answer)
+        self.assertIn("共2处", answer)
+
+    @patch("guoji_yichan_guancha.query.searchWorldHeritageRegistry")
+    def test_registry_mode_answers_country_count_query_with_total_and_full_list(self, mock_registry_search) -> None:
+        mock_registry_search.return_value = [
+            {
+                "site_name": "长城",
+                "country": "中国",
+                "inscription_year": 1987,
+                "heritage_type": "cultural",
+                "unesco_url": "https://whc.unesco.org/en/list/438",
+                "description": "",
+            },
+            {
+                "site_name": "明清故宫",
+                "country": "中国",
+                "inscription_year": 1987,
+                "heritage_type": "cultural",
+                "unesco_url": "https://whc.unesco.org/en/list/439",
+                "description": "",
+            },
+            {
+                "site_name": "莫高窟",
+                "country": "中国",
+                "inscription_year": 1987,
+                "heritage_type": "cultural",
+                "unesco_url": "https://whc.unesco.org/en/list/440",
+                "description": "",
+            },
+        ]
+        library_path = Path("tests/tmp/articles_registry_count.jsonl")
+        library_path.parent.mkdir(parents=True, exist_ok=True)
+        library_path.write_text("", encoding="utf-8")
+
+        answer = answer_question("中国一共有多少处世界遗产地？", library_path, limit=5)
+
+        mock_registry_search.assert_called_once()
+        self.assertIn("UNESCO 世界遗产名录信息：", answer)
+        self.assertIn("中国世界遗产地数量：3处", answer)
+        self.assertIn("检索范围：中国世界遗产地（共3处）", answer)
+        self.assertIn("长城", answer)
+        self.assertIn("明清故宫", answer)
+        self.assertIn("莫高窟", answer)
+        self.assertNotIn("基于库内文章归纳", answer)
+
+    @patch("guoji_yichan_guancha.query._fetch_unesco_records")
+    def test_registry_search_filters_by_structured_fields(self, mock_fetch_records) -> None:
+        mock_fetch_records.return_value = [
+            {
+                "id_no": 394,
+                "name_zh": "威尼斯及其泻湖",
+                "name_en": "Venice and its Lagoon",
+                "states_names": ["Italy"],
+                "date_inscribed": 1987,
+                "category": "Cultural",
+            },
+            {
+                "id_no": 91,
+                "name_zh": "罗马历史中心",
+                "name_en": "Historic Centre of Rome",
+                "states_names": ["Italy"],
+                "date_inscribed": 1980,
+                "category": "Cultural",
+            },
+        ]
+
+        from guoji_yichan_guancha.query import searchWorldHeritageRegistry
+
+        matches = searchWorldHeritageRegistry(
+            {
+                "mode": "collection_query",
+                "site_name": None,
+                "country": "Italy",
+                "heritage_type": "cultural",
+                "inscription_year": "1987",
+                "asks_fields": {},
+                "general_examples": False,
+            }
+        )
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["site_name"], "威尼斯及其泻湖")
+
+    def test_registry_fetch_params_prefer_structured_where_filters(self) -> None:
+        from guoji_yichan_guancha.query import _build_registry_fetch_params
+
+        site_requests = _build_registry_fetch_params(
+            {
+                "mode": "entity_lookup",
+                "site_name": "威尼斯及其泻湖",
+                "country": None,
+                "heritage_type": None,
+                "inscription_year": None,
+                "asks_fields": {"year": True},
+                "general_examples": False,
+            }
+        )
+        self.assertTrue(any("where" in request and "name_zh like" in request["where"] for request in site_requests))
+
+        collection_requests = _build_registry_fetch_params(
+            {
+                "mode": "collection_query",
+                "site_name": None,
+                "country": "意大利",
+                "heritage_type": "cultural",
+                "inscription_year": None,
+                "asks_fields": {},
+                "general_examples": True,
+            }
+        )
+        self.assertTrue(any('states_names like "Italy"' in request.get("where", "") for request in collection_requests))
+        self.assertTrue(any('category = "Cultural"' in request.get("where", "") for request in collection_requests))
 
     @patch("guoji_yichan_guancha.query.searchWorldHeritageSites")
     def test_theme_led_query_prioritizes_resilience_and_uses_evidence_derived_headings(self, mock_search) -> None:

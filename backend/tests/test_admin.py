@@ -12,7 +12,7 @@ from app.config import Settings
 from app.database import Base
 from app.deps import get_db_session, get_settings
 from app.main import app
-from app.models import Conversation, User
+from app.models import Conversation, Message, User
 
 
 def _build_admin_test_client(library_path: Path):
@@ -177,3 +177,67 @@ def test_admin_refresh_library_missing_header_is_rejected(tmp_path):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Missing X-Debug-User"
+
+
+def test_admin_messages_returns_all_user_questions_for_admin(tmp_path):
+    library_path = tmp_path / "library" / "articles.jsonl"
+    library_path.parent.mkdir(parents=True, exist_ok=True)
+    client, engine, session_factory = _build_admin_test_client(library_path)
+
+    try:
+        with session_factory() as db:
+            admin = User(email="admin@example.com", role="admin")
+            guest = User(email="guest-1@guest.local", role="user")
+            db.add_all([admin, guest])
+            db.flush()
+
+            conversation = Conversation(user_id=guest.id, title="第一问")
+            db.add(conversation)
+            db.flush()
+
+            first_message = Message(conversation_id=conversation.id, role="user", content="第一问")
+            assistant_message = Message(conversation_id=conversation.id, role="assistant", content="第一答")
+            second_message = Message(conversation_id=conversation.id, role="user", content="第二问")
+            db.add_all([first_message, assistant_message, second_message])
+            db.flush()
+
+            db.execute(
+                Message.__table__.update()
+                .where(Message.id == first_message.id)
+                .values(created_at=datetime(2024, 1, 1, 0, 0, 0))
+            )
+            db.execute(
+                Message.__table__.update()
+                .where(Message.id == assistant_message.id)
+                .values(created_at=datetime(2024, 1, 1, 0, 1, 0))
+            )
+            db.execute(
+                Message.__table__.update()
+                .where(Message.id == second_message.id)
+                .values(created_at=datetime(2024, 1, 1, 0, 2, 0))
+            )
+            db.commit()
+
+        response = client.get(
+            "/admin/messages",
+            headers={"X-Debug-User": "admin@example.com"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 2
+    assert body[0]["content"] == "第二问"
+    assert body[0]["conversation_title"] == "第一问"
+    assert body[0]["user_email"] == "guest-1@guest.local"
+    assert body[1]["content"] == "第一问"
+    assert set(body[0].keys()) == {
+        "message_id",
+        "conversation_id",
+        "conversation_title",
+        "content",
+        "user_email",
+        "created_at",
+    }

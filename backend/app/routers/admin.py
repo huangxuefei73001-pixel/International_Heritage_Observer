@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.deps import get_db_session, get_settings
-from app.models import Conversation, User
+from app.models import Conversation, Message, User
 from app.services.sync_service import refresh_library
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -47,6 +47,34 @@ def list_conversations(
             "updated_at": conversation.updated_at,
         }
         for conversation, user_email in rows
+    ]
+
+
+@router.get("/messages")
+def list_recent_messages(
+    x_debug_user: str | None = Header(default=None, alias="X-Debug-User"),
+    db: Session = Depends(get_db_session),
+) -> list[dict]:
+    _require_admin_user(x_debug_user, db)
+
+    rows = db.execute(
+        select(Message, Conversation.title, User.email)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .join(User, User.id == Conversation.user_id)
+        .where(Message.role == "user")
+        .order_by(Message.created_at.desc(), Message.id.desc())
+    ).all()
+
+    return [
+        {
+            "message_id": message.id,
+            "conversation_id": message.conversation_id,
+            "conversation_title": conversation_title,
+            "content": message.content,
+            "user_email": user_email,
+            "created_at": message.created_at,
+        }
+        for message, conversation_title, user_email in rows
     ]
 
 
