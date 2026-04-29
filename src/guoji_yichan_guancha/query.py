@@ -196,6 +196,7 @@ REGISTRY_COUNTRY_ALIASES = {
 REGISTRY_SITE_PATTERNS = (
     re.compile(r"(?P<name>[\u4e00-\u9fffA-Za-z·\-\s]{2,40})的(?:列入年份|年份|类型|国家|页面|网址|链接)"),
     re.compile(r"(?P<name>[\u4e00-\u9fffA-Za-z·\-\s]{2,40})是什么时候列入"),
+    re.compile(r"(?P<name>[\u4e00-\u9fffA-Za-z·\-\s]{2,40})哪一年列入(?:世界遗产|世界遗产名录)?"),
     re.compile(r"(?P<name>[\u4e00-\u9fffA-Za-z·\-\s]{2,40})是(?:什么类型|哪一年列入)"),
 )
 REGISTRY_COLLECTION_PAGE_SIZE = 100
@@ -229,6 +230,38 @@ REGISTRY_NOISE_TERMS = (
     "年份",
     "类型",
     "国家",
+)
+KB_PRACTICE_CASE_TERMS = (
+    "数字化",
+    "数字技术",
+    "博物馆",
+    "展示",
+    "展陈",
+    "展览",
+    "教育",
+    "传播",
+    "活化",
+    "社区参与",
+    "实践案例",
+    "项目案例",
+    "AI",
+    "AR",
+    "VR",
+    "虚拟",
+    "数字孪生",
+)
+EXPLICIT_REGISTRY_TERMS = (
+    "名录",
+    "世界遗产名录",
+    "UNESCO 页面",
+    "unesco 页面",
+    "联合国教科文组织页面",
+    "列入年份",
+    "哪一年列入",
+    "什么时候列入",
+    "所在国",
+    "类型",
+    "官网",
 )
 REGISTRY_SELECT_FIELDS = ",".join(
     (
@@ -972,6 +1005,16 @@ def _extract_registry_site_name(question: str) -> str | None:
     return None
 
 
+def _is_kb_practice_case_query(question: str, analysis: dict) -> bool:
+    if not _contains_any(question, CASE_EXTRACTION_SIGNALS):
+        return False
+    if _contains_any(question, EXPLICIT_REGISTRY_TERMS):
+        return False
+    if _extract_registry_country(question):
+        return False
+    return _contains_any(question, KB_PRACTICE_CASE_TERMS)
+
+
 def _parse_unesco_registry_query(question: str, analysis: dict) -> dict:
     site_name = _extract_registry_site_name(question)
     country = _extract_registry_country(question)
@@ -985,15 +1028,16 @@ def _parse_unesco_registry_query(question: str, analysis: dict) -> dict:
         "count": any(term in question for term in REGISTRY_COUNT_TERMS),
     }
     general_examples = (
-        bool(analysis.get("case_carrier_terms"))
+        "世界遗产名录" in question
         and not analysis.get("primary_theme_terms")
         and any(term in question for term in REGISTRY_EXAMPLE_TERMS)
     )
+    type_collection_query = bool(heritage_type and (asks_fields["type"] or "名录" in question))
     if site_name:
         mode = "entity_lookup"
-    elif country or heritage_type or general_examples:
+    elif country or type_collection_query or general_examples:
         mode = "collection_query"
-    elif year and (any(asks_fields.values()) or country or heritage_type):
+    elif year and (any(asks_fields.values()) or country or type_collection_query):
         mode = "collection_query"
     else:
         mode = None
@@ -1325,6 +1369,8 @@ def _build_case_clarification_question(question: str, analysis: dict) -> str:
 
 
 def _select_unesco_mode(question: str, analysis: dict) -> str | None:
+    if question and _is_kb_practice_case_query(question, analysis):
+        return None
     registry_query = analysis.get("unesco_registry_query", {})
     explicit_registry_lookup = bool(
         registry_query.get("site_name")

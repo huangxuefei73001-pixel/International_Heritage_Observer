@@ -40,6 +40,16 @@ class QueryTest(unittest.TestCase):
         analysis = _analyze_question(question, [], date(2026, 4, 23))
         self.assertEqual(_select_unesco_mode(question, analysis), "thematic_case")
 
+    def test_mode_selection_keeps_practice_case_queries_in_kb(self) -> None:
+        question = "有什么数字化技术支持遗产地或博物馆展示的案例？"
+        analysis = _analyze_question(question, [], date(2026, 4, 29))
+        self.assertIsNone(_select_unesco_mode(question, analysis))
+
+    def test_mode_selection_uses_registry_for_site_year_lookup(self) -> None:
+        question = "长城哪一年列入世界遗产？"
+        analysis = _analyze_question(question, [], date(2026, 4, 29))
+        self.assertEqual(_select_unesco_mode(question, analysis), "registry_query")
+
     def test_registry_site_name_matching_supports_partial_and_fuzzy_variants(self) -> None:
         record = {"name_zh": "威尼斯及泻湖", "name_en": "Venice and its Lagoon"}
         self.assertTrue(_matches_registry_site_name(record, "威尼斯"))
