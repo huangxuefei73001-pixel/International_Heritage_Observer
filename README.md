@@ -94,27 +94,6 @@ PYTHONPATH=src python3 scripts/query_library.py "最近韩国有什么世界遗�
 - 当前管理员账号固定为 `admin`
 - 当前管理员密码固定为 `admin`
 
-## 更新文章库
-
-### 增量补库
-
-默认新增目录：
-
-`/Users/pauline/Desktop/国际遗产观察/3.26-国际观察mptext抓取/本次新增`
-
-把新下载的 `.docx` 放进去后，运行：
-
-```bash
-PYTHONPATH=src python3 scripts/sync_incremental.py
-```
-
-这条命令完成后会：
-
-- 把新文章增量写入知识库
-- 写入 `data/sync_logs/` 运行日志
-- 将 `本次新增` 里的已处理 `.docx` 剪切到同级目录 `已同步归档/时间戳批次/`
-
-这样 `本次新增` 文件夹会自动腾空，方便你下一次继续往里面补新文章。
 
 ### 全量重建库
 
