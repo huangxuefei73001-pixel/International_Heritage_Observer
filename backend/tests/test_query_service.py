@@ -51,6 +51,111 @@ def test_answer_from_library_returns_library_metadata_for_kb_questions(tmp_path)
     assert result["sources"] == []
 
 
+def test_answer_from_library_returns_recent_hotspots_without_generic_lookup(tmp_path):
+    library_path = tmp_path / "articles.jsonl"
+    documents = [
+        {
+            "article_id": "1",
+            "title": "UNESCO同韩国签署第48届世界遗产大会协议",
+            "published_at": "2026-05-14 11:25",
+            "channel": "国际遗产观察",
+            "category": "世界遗产大会",
+            "source_url": "https://mp.weixin.qq.com/s/world-heritage",
+            "local_source_path": "/tmp/a.docx",
+            "content_text": "世界遗产大会、管理、治理、委员会。",
+            "content_html_excerpt": "<p>x</p>",
+            "parse_status": "ok",
+            "tags_auto": [],
+        },
+        {
+            "article_id": "2",
+            "title": "ICOMOS世界遗产评估部招募助理",
+            "published_at": "2026-05-03 11:25",
+            "channel": "国际遗产观察",
+            "category": "ICOMOS",
+            "source_url": "https://mp.weixin.qq.com/s/evaluation",
+            "local_source_path": "/tmp/b.docx",
+            "content_text": "世界遗产评估、申报、OUV、影响评估。",
+            "content_html_excerpt": "<p>x</p>",
+            "parse_status": "ok",
+            "tags_auto": [],
+        },
+        {
+            "article_id": "3",
+            "title": "CHiFA-OWHC 城市遗产再生加速器项目报告",
+            "published_at": "2026-05-18 20:30",
+            "channel": "国际遗产观察",
+            "category": "未分类",
+            "source_url": "https://mp.weixin.qq.com/s/urban",
+            "local_source_path": "/tmp/c.docx",
+            "content_text": "城市遗产、再生、可持续发展。",
+            "content_html_excerpt": "<p>x</p>",
+            "parse_status": "ok",
+            "tags_auto": [],
+        },
+        {
+            "article_id": "4",
+            "title": "ICCROM发布遗产与景观专业培训手册",
+            "published_at": "2026-02-20 20:31",
+            "channel": "国际遗产观察",
+            "category": "ICCROM",
+            "source_url": "https://mp.weixin.qq.com/s/landscape",
+            "local_source_path": "/tmp/d.docx",
+            "content_text": "景观、规划、城市、可持续。",
+            "content_html_excerpt": "<p>x</p>",
+            "parse_status": "ok",
+            "tags_auto": [],
+        },
+        {
+            "article_id": "5",
+            "title": "奈文研石垣BIM遗产信息系统研究",
+            "published_at": "2026-05-20 20:30",
+            "channel": "国际遗产观察",
+            "category": "未分类",
+            "source_url": "https://mp.weixin.qq.com/s/bim",
+            "local_source_path": "/tmp/e.docx",
+            "content_text": "BIM、数字、信息系统、数据。",
+            "content_html_excerpt": "<p>x</p>",
+            "parse_status": "ok",
+            "tags_auto": [],
+        },
+        {
+            "article_id": "6",
+            "title": "第四届欧洲数字叙事节即将启动",
+            "published_at": "2026-05-12 20:30",
+            "channel": "国际遗产观察",
+            "category": "未分类",
+            "source_url": "https://mp.weixin.qq.com/s/digital",
+            "local_source_path": "/tmp/f.docx",
+            "content_text": "数字叙事、平台、展示。",
+            "content_html_excerpt": "<p>x</p>",
+            "parse_status": "ok",
+            "tags_auto": [],
+        },
+    ]
+    library_path.write_text(
+        "\n".join(json.dumps(document, ensure_ascii=False) for document in documents) + "\n",
+        encoding="utf-8",
+    )
+
+    with patch("app.services.query_service.build_answer_bundle") as mock_build:
+        result = answer_from_library_with_llm(
+            "最近一年国际遗产界的关注热点是什么",
+            library_path,
+            api_key="test-key",
+            model="openai/gpt-5.4",
+        )
+
+    mock_build.assert_not_called()
+    assert "整体关注热点" in result["answer"]
+    assert "概念界定" not in result["answer"]
+    assert "世界遗产治理与管理体系更新" in result["answer"]
+    assert "城市遗产、再生与可持续发展" in result["answer"]
+    assert "数字化、AI、BIM与遗产信息系统" in result["answer"]
+    assert result["sources"]
+    assert result["sources"][0]["url"].startswith("https://mp.weixin.qq.com/s/")
+
+
 def test_answer_from_library_with_llm_uses_broader_limit_and_builds_evidence_message(tmp_path):
     library_path = tmp_path / "articles.jsonl"
     library_path.write_text(
