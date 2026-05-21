@@ -637,6 +637,70 @@ def test_chat_ask_endpoint_returns_structured_answer():
     assert body["sources"][0]["url"] == "https://mp.weixin.qq.com/s/example"
 
 
+def test_chat_ask_endpoint_returns_library_metadata_for_kb_questions(tmp_path):
+    library_path = tmp_path / "chat_library.jsonl"
+    library_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "article_id": "1",
+                        "title": "韩国世界遗产昌德宫5G增强现实游览app",
+                        "published_at": "2022-06-01 20:30",
+                        "channel": "国际遗产观察",
+                        "category": "韩国",
+                        "source_url": "https://mp.weixin.qq.com/s/case1",
+                        "local_source_path": "/tmp/a.docx",
+                        "content_text": "5G、AR、互动地图与虚拟导游支持遗产地展示。",
+                        "content_html_excerpt": "<p>x</p>",
+                        "parse_status": "ok",
+                        "tags_auto": ["AR", "展示"],
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "article_id": "2",
+                        "title": "UNESCO世界遗产数字平台建设",
+                        "published_at": "2024-03-01 20:30",
+                        "channel": "国际遗产观察",
+                        "category": "UNESCO",
+                        "source_url": "https://mp.weixin.qq.com/s/case2",
+                        "local_source_path": "/tmp/b.docx",
+                        "content_text": "数字平台支持遗产展示。",
+                        "content_html_excerpt": "<p>y</p>",
+                        "parse_status": "ok",
+                        "tags_auto": ["数字平台"],
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    client, engine, _ = _build_chat_test_client(library_path)
+
+    try:
+        response = client.post(
+            "/chat/ask",
+            headers={"X-Debug-User": "user@example.com"},
+            json={"question": "你的KB都有什么？来源是什么？"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "知识库本身的范围和来源" in body["answer"]
+    assert "当前知识库共有 `2` 条文章记录" in body["answer"]
+    assert "`韩国`：1" in body["answer"]
+    assert "`UNESCO`：1" in body["answer"]
+    assert body["sources"] == []
+
+
 def test_chat_ask_endpoint_returns_controlled_error_when_library_is_missing():
     missing_path = Path(tempfile.gettempdir()) / "does-not-exist-chat-library.jsonl"
     if missing_path.exists():
@@ -811,7 +875,7 @@ def test_chat_ask_reuses_existing_conversation(tmp_path):
     assert conversation.updated_at > datetime(2024, 1, 1, 0, 0, 0)
 
 
-@patch("app.routers.chat.answer_from_library")
+@patch("app.routers.chat.answer_from_library_with_llm")
 def test_chat_ask_injects_risk_scene_option_into_effective_question(mock_answer_from_library, tmp_path):
     library_path = tmp_path / "chat_library.jsonl"
     library_path.write_text(
@@ -883,7 +947,7 @@ def test_chat_ask_injects_risk_scene_option_into_effective_question(mock_answer_
     assert "sea level rise" in injected_question
 
 
-@patch("app.routers.chat.answer_from_library")
+@patch("app.routers.chat.answer_from_library_with_llm")
 def test_chat_ask_injects_second_layer_risk_scene_option_into_effective_question(mock_answer_from_library, tmp_path):
     library_path = tmp_path / "chat_library.jsonl"
     library_path.write_text(
@@ -1033,7 +1097,7 @@ def test_chat_ask_keeps_user_message_when_answer_generation_fails(tmp_path, monk
     )
     client, engine, session_factory = _build_chat_test_client(library_path)
     monkeypatch.setattr(
-        "app.routers.chat.answer_from_library",
+        "app.routers.chat.answer_from_library_with_llm",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 

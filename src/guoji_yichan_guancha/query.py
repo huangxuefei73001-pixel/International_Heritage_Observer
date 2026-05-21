@@ -1094,12 +1094,12 @@ def _build_conclusion(question: str, analysis: dict, matches: list[dict]) -> str
     if _is_theme_led_case_query(analysis):
         return f"{prefix}的重点不在一般性的世界遗产动态，而在于围绕“{focus}”梳理出可支撑案例分析的主题材料。"
     if analysis["task_type"] == "concept":
-        return f"{prefix}涉及的{focus}定义主要可从{len(matches)}条库内线索中把握。"
+        return f"{prefix}涉及的{focus}定义，主要可从现有库内相关材料中把握。"
     if analysis["task_type"] == "trend":
-        return f"{prefix}涉及的{focus}主要可从{len(matches)}条库内线索中归纳。"
+        return f"{prefix}涉及的{focus}，主要可从现有库内相关材料中归纳。"
     if analysis["task_type"] == "case":
-        return f"{prefix}相关的{focus}主要可从{len(matches)}条库内线索中提取。"
-    return f"{prefix}的{focus}主要集中在{len(matches)}条库内线索。"
+        return f"{prefix}相关的{focus}，主要可从现有库内相关材料中提取。"
+    return f"{prefix}的{focus}，主要集中在现有库内相关材料中。"
 
 
 def _build_takeaways(conclusion: str, matches: list[dict]) -> list[str]:
@@ -1237,7 +1237,7 @@ def _build_library_conclusion_text(question: str, analysis: dict, matches: list[
     elif analysis["task_type"] == "trend":
         extra = "当前命中的材料更像是几条持续出现的讨论主线，而不是一次性事件。"
     elif analysis["task_type"] == "case":
-        extra = "当前命中的材料更适合提炼实践路径和案例线索。"
+        extra = "当前命中的材料更适合提炼实践路径、案例类型和可借鉴做法。"
     else:
         extra = "当前命中的材料更适合判断近期动作集中落在哪些方向。"
 
@@ -1247,7 +1247,7 @@ def _build_library_conclusion_text(question: str, analysis: dict, matches: list[
     if category_mix:
         details.append(f"较多落在{category_mix}等方向")
     if theme_labels:
-        details.append(f"可归纳为{theme_labels}几条线索")
+        details.append(f"可归纳为{theme_labels}几类重点")
 
     if details:
         return f"基于库内文章归纳，{conclusion}{extra} 当前{'，'.join(details)}。"

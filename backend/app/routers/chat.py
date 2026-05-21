@@ -12,7 +12,7 @@ from app.config import Settings
 from app.deps import get_db_session, get_settings
 from app.models import Conversation, Message, User
 from app.schemas import AskRequest, AskResponse, ConversationDetail, ConversationMessage, ConversationSummary
-from app.services.query_service import answer_from_library
+from app.services.query_service import answer_from_library_with_llm
 from guoji_yichan_guancha.query import (
     inject_risk_scene_detail_option,
     inject_risk_scene_option,
@@ -199,9 +199,11 @@ def ask(
             )
         )
     try:
-        result = answer_from_library(
+        result = answer_from_library_with_llm(
             effective_question,
             library_path,
+            api_key=settings.openrouter_api_key,
+            model=settings.openrouter_model,
             strict_source_mode=settings.strict_source_mode,
         )
     except Exception as exc:  # pragma: no cover - controlled failure path

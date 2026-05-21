@@ -113,7 +113,28 @@ class QueryTest(unittest.TestCase):
         self.assertIn("证据边界：", answer)
         self.assertIn("[一般动态] [韩国召开第48届世界遗产大会联席工作会](https://mp.weixin.qq.com/s/example)", answer)
         self.assertIn("https://mp.weixin.qq.com/s/example", answer)
-        self.assertIn("2026年韩国的世界遗产动态主要集中在", answer)
+        self.assertIn("2026年韩国的世界遗产动态，主要集中在现有库内相关材料中。", answer)
+
+    def test_answer_question_does_not_hardcode_five_clues_for_case_queries(self) -> None:
+        library_path = Path("tests/tmp/articles_digital_cases.jsonl")
+        library_path.parent.mkdir(parents=True, exist_ok=True)
+        library_path.write_text(
+            "\n".join(
+                [
+                    '{"article_id":"1","title":"韩国世界遗产昌德宫5G增强现实游览app","published_at":"2022-06-01 20:30","channel":"国际遗产观察","category":"韩国","source_url":"https://mp.weixin.qq.com/s/case1","local_source_path":"/tmp/a.docx","content_text":"5G、AR、互动地图与虚拟导游支持遗产地展示。","content_html_excerpt":"<p>x</p>","parse_status":"ok","tags_auto":["AR","展示"]}',
+                    '{"article_id":"2","title":"【展览】伊朗世界遗产波斯波利斯线上3D虚拟游","published_at":"2023-05-03 20:30","channel":"国际遗产观察","category":"伊朗","source_url":"https://mp.weixin.qq.com/s/case2","local_source_path":"/tmp/b.docx","content_text":"通过3D复原与线上漫游支持遗产展示。","content_html_excerpt":"<p>y</p>","parse_status":"ok","tags_auto":["3D","虚拟游"]}',
+                    '{"article_id":"3","title":"UNESCO举行遗产数字平台建设专家研讨会","published_at":"2022-07-19 20:30","channel":"国际遗产观察","category":"UNESCO","source_url":"https://mp.weixin.qq.com/s/case3","local_source_path":"/tmp/c.docx","content_text":"数字平台建设与展示传播相关。","content_html_excerpt":"<p>z</p>","parse_status":"ok","tags_auto":["数字平台","展示"]}',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        answer = answer_question("有什么数字化技术支持遗产地或博物馆展示的实践？", library_path, limit=10)
+
+        self.assertNotIn("5条库内线索", answer)
+        self.assertNotIn("可从3条库内线索中提取", answer)
+        self.assertNotIn("几条线索", answer)
 
     def test_answer_question_prioritizes_matching_year_and_category(self) -> None:
         library_path = Path("tests/tmp/articles_ranked.jsonl")
