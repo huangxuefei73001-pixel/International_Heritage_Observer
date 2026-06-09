@@ -9,13 +9,16 @@ from .library import build_library
 
 
 def _archive_source_batch(source_dir: Path, archive_dir: Path, run_at: datetime) -> int:
-    docx_paths = sorted(source_dir.rglob("*.docx"))
-    if not docx_paths:
+    source_paths = sorted(
+        [*source_dir.rglob("*.docx"), *source_dir.rglob("*.md")],
+        key=lambda path: str(path),
+    )
+    if not source_paths:
         return 0
 
     batch_dir = archive_dir / run_at.strftime("%Y%m%d-%H%M%S")
     moved_count = 0
-    for path in docx_paths:
+    for path in source_paths:
         relative_path = path.relative_to(source_dir)
         target_path = batch_dir / relative_path
         target_path.parent.mkdir(parents=True, exist_ok=True)

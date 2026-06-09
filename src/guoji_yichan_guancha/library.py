@@ -3,7 +3,20 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .parser import parse_docx_article
+from .parser import parse_docx_article, parse_markdown_article
+
+
+def _iter_source_files(source_dir: Path) -> list[Path]:
+    return sorted(
+        [*source_dir.rglob("*.docx"), *source_dir.rglob("*.md")],
+        key=lambda path: str(path),
+    )
+
+
+def _parse_article(path: Path, category: str):
+    if path.suffix.lower() == ".md":
+        return parse_markdown_article(path, category=category)
+    return parse_docx_article(path, category=category)
 
 
 def build_library(source_dir: Path, output_dir: Path) -> dict:
@@ -27,9 +40,10 @@ def build_library(source_dir: Path, output_dir: Path) -> dict:
                 if category:
                     existing_categories.add(category)
 
-    for path in sorted(source_dir.rglob("*.docx")):
+    source_paths = _iter_source_files(source_dir)
+    for path in source_paths:
         category = path.parent.name if path.parent != source_dir else "未分类"
-        record = parse_docx_article(path, category=category)
+        record = _parse_article(path, category=category)
         if record.source_url and record.source_url in seen_urls:
             continue
         if record.source_url:
@@ -43,7 +57,7 @@ def build_library(source_dir: Path, output_dir: Path) -> dict:
 
     summary = {
         "article_count": len(records),
-        "skipped_duplicates": len(list(source_dir.rglob("*.docx"))) - len(records),
+        "skipped_duplicates": len(source_paths) - len(records),
         "total_article_count": len(seen_urls),
         "categories": sorted(existing_categories | {record.category for record in records}),
     }

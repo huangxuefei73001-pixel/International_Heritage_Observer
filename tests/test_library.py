@@ -70,6 +70,43 @@ class BuildLibraryTest(unittest.TestCase):
         self.assertEqual(second["skipped_duplicates"], 1)
         self.assertEqual(second["total_article_count"], 1)
 
+    def test_build_library_reads_markdown_articles(self) -> None:
+        source_dir = Path("tests/tmp/library-md-source")
+        output_dir = Path("tests/tmp/library-md-output")
+
+        for target in (source_dir, output_dir):
+            if target.exists():
+                for path in sorted(target.rglob("*"), reverse=True):
+                    if path.is_file():
+                        path.unlink()
+                    elif path.is_dir():
+                        path.rmdir()
+
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / "sample.md").write_text(
+            "\n".join(
+                [
+                    "奈文研石垣BIM遗产信息系统研究",
+                    "================",
+                    "",
+                    "原创 国际遗产观察 2026-05-20 20:30 北京",
+                    "",
+                    "> 原文地址: [https://mp.weixin.qq.com/s/sample-md](https://mp.weixin.qq.com/s/sample-md)",
+                    "",
+                    "BIM、数字、信息系统、数据。",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = build_library(source_dir, output_dir)
+
+        self.assertEqual(result["article_count"], 1)
+        self.assertEqual(result["skipped_duplicates"], 0)
+        self.assertIn("未分类", result["categories"])
+        articles = (output_dir / "articles.jsonl").read_text(encoding="utf-8")
+        self.assertIn("奈文研石垣BIM遗产信息系统研究", articles)
+
     def test_sync_incremental_writes_run_log(self) -> None:
         fixture_dir = Path("tests/fixtures")
         source_dir = Path("tests/tmp/sync-source")
@@ -104,6 +141,50 @@ class BuildLibraryTest(unittest.TestCase):
         self.assertEqual(result["moved_source_files"], 1)
         self.assertTrue((archive_dir / "20260409-153000" / "sample_article.docx").exists())
         self.assertEqual(len(list(source_dir.glob("*.docx"))), 0)
+
+    def test_sync_incremental_moves_markdown_files_to_archive(self) -> None:
+        source_dir = Path("tests/tmp/sync-md-source")
+        output_dir = Path("tests/tmp/library-sync-md")
+        log_dir = Path("tests/tmp/sync-md-logs")
+        archive_dir = Path("tests/tmp/sync-md-archive")
+
+        for target in (source_dir, output_dir, log_dir, archive_dir):
+            if target.exists():
+                for path in sorted(target.rglob("*"), reverse=True):
+                    if path.is_file():
+                        path.unlink()
+                    elif path.is_dir():
+                        path.rmdir()
+
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / "sample.md").write_text(
+            "\n".join(
+                [
+                    "第四届欧洲数字叙事节即将启动",
+                    "================",
+                    "",
+                    "原创 国际遗产观察 2026-05-12 20:30 北京",
+                    "",
+                    "> 原文地址: [https://mp.weixin.qq.com/s/sample-sync-md](https://mp.weixin.qq.com/s/sample-sync-md)",
+                    "",
+                    "数字叙事、平台、展示。",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = sync_incremental(
+            source_dir,
+            output_dir,
+            log_dir,
+            archive_dir,
+            run_at=datetime(2026, 6, 9, 10, 0, 0),
+        )
+
+        self.assertEqual(result["article_count"], 1)
+        self.assertEqual(result["moved_source_files"], 1)
+        self.assertTrue((archive_dir / "20260609-100000" / "sample.md").exists())
+        self.assertEqual(len(list(source_dir.glob("*.md"))), 0)
 
     def test_sync_script_defaults_to_benci_xinzeng_directory(self) -> None:
         script_path = Path("scripts/sync_incremental.py")
