@@ -29,41 +29,9 @@ python3 scripts/install_codex_skill.py
 
 `~/.codex/skills/guoji-yichan-guancha/SKILL.md`
 
-而且会把当前电脑上的项目绝对路径自动写进去，所以不用再手改路径。
+而且会自动写入当前电脑上的项目路径，所以不用再手改路径。
 
-### 手动方式：拷贝整个项目目录
-
-如果你不想跑安装脚本，也可以手动安装。
-
-把整个项目目录复制给对方：
-
-`/Users/pauline/Documents/国际遗产观察`
-
-不要只发 `SKILL.md`，因为这个 skill 依赖项目里的脚本和文章库。
-
-### 2. 安装 skill
-
-对方需要把下面这个文件：
-
-`skills/guoji-yichan-guancha/SKILL.md`
-
-复制到他自己的：
-
-`~/.codex/skills/guoji-yichan-guancha/SKILL.md`
-
-如果目录不存在，就先创建：
-
-```bash
-mkdir -p ~/.codex/skills/guoji-yichan-guancha
-```
-
-然后复制：
-
-```bash
-cp /你的项目路径/skills/guoji-yichan-guancha/SKILL.md ~/.codex/skills/guoji-yichan-guancha/SKILL.md
-```
-
-### 3. 在项目根目录使用
+### 在项目根目录使用
 
 进入项目根目录后，可以直接这样提问：
 
@@ -81,4 +49,4 @@ PYTHONPATH=src python3 scripts/build_library.py --source-dir "<你的文章总�
 
 ### 如果对方也用 Codex
 
-“最简单的是 clone 仓库后运行 `python3 scripts/install_codex_skill.py`。它会自动把 skill 安装到你的 Codex，并写好本机路径。”
+“最简单的是 clone 仓库后运行 `python3 scripts/install_codex_skill.py`。它会自动把 skill 安装到你的 Codex。”
