@@ -1,11 +1,6 @@
 # 国际遗产观察
 
-一个基于“国际遗产观察”文章库的本地研究问答工具。
-
-它现在有两种使用方式：
-
-- `Codex skill`：适合已经在用 Codex 的人
-- `网页问答 bot`：适合不熟悉代码、只想直接提问的人
+一个基于“国际遗产观察”文章库的本地研究问答 skill。
 
 ## 项目包含什么
 
@@ -17,10 +12,6 @@
   新文章增量补库入口
 - `skills/guoji-yichan-guancha/SKILL.md`
   项目内的 skill 源文件
-- `web/`
-  网页前端
-- `backend/`
-  网页后端
 
 ## 给 Codex 用户使用
 
@@ -80,21 +71,6 @@ cp /你的项目路径/skills/guoji-yichan-guancha/SKILL.md ~/.codex/skills/guoj
 PYTHONPATH=src python3 scripts/query_library.py "最近韩国有什么世界遗产动态？" --library data/library/articles.jsonl --limit 5
 ```
 
-## 给普通用户使用
-
-如果对方不使用 Codex，最适合的方式不是发 skill，而是直接使用你部署好的网页问答 bot。
-
-这样对方只需要打开网页即可提问，不需要安装 Codex，也不需要配置 skill。
-
-当前网页版的最小使用机制是：
-
-- 普通使用者不需要注册，首次打开会自动获得一个独立访客身份
-- 每个访客只看到自己的对话与历史
-- 管理员通过 `/admin/login` 登录
-- 当前管理员账号固定为 `admin`
-- 当前管理员密码固定为 `admin`
-
-
 ### 全量重建库
 
 ```bash
@@ -106,7 +82,3 @@ PYTHONPATH=src python3 scripts/build_library.py --source-dir "<你的文章总�
 ### 如果对方也用 Codex
 
 “最简单的是 clone 仓库后运行 `python3 scripts/install_codex_skill.py`。它会自动把 skill 安装到你的 Codex，并写好本机路径。”
-
-### 如果对方不用 Codex
-
-“直接打开网页提问，不需要安装 skill。”
