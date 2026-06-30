@@ -39,6 +39,24 @@ python3 scripts/install_codex_skill.py
 PYTHONPATH=src python3 scripts/query_library.py "最近韩国有什么世界遗产动态？" --library data/library/articles.jsonl --limit 5
 ```
 
+### 已安装用户如何更新
+
+这个项目平时主要更新的是知识库文章，不是 skill 逻辑。
+
+如果只是补充了新文章，已安装用户通常只需要在本地更新仓库内容：
+
+```bash
+git pull
+```
+
+这样本地的 `data/library/articles.jsonl` 更新后，skill 读取到的内容也会一起更新。
+
+只有在 skill 逻辑本身发生变化时，才建议额外再运行一次：
+
+```bash
+python3 scripts/install_codex_skill.py
+```
+
 ### 全量重建库
 
 ```bash
